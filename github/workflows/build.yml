@@ -26,32 +26,29 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Setup Gradle
-        uses: gradle/gradle-build-action@v3
+        uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.2
 
-      - name: Make gradlew executable (if exists)
+      - name: Verify Project Structure
         run: |
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            echo "gradlew found"
-          else
-            echo "gradlew not found, using gradle directly"
-          fi
+          echo "=== Project Structure ==="
+          ls -la
+          echo ""
+          echo "=== Gradle files ==="
+          ls -la gradle/wrapper/ || echo "No wrapper folder"
+          echo ""
+          echo "=== App folder ==="
+          ls -la app/ || echo "No app folder"
 
-      - name: Generate Debug Keystore
+      - name: Build Release APK with system Gradle
         run: |
-          keytool -genkey -v -keystore debug.keystore \
-            -alias androiddebugkey \
-            -storepass android \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US" || true
+          gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Build Release APK
-        run: gradle assembleRelease --stacktrace --no-daemon
+      - name: List APK output
+        run: |
+          echo "=== APK Files ==="
+          find app/build/outputs/apk/ -name "*.apk" -exec ls -lh {} \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -66,6 +63,10 @@ jobs:
         with:
           tag_name: v${{ github.run_number }}
           name: Security APK v${{ github.run_number }}
+          body: |
+            ## Security APK Build #${{ github.run_number }}
+            
+            Download the APK below and install it on the target device.
           files: app/build/outputs/apk/release/*.apk
           draft: false
           prerelease: false

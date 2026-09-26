@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.sec.check'
-    compileSdk 34
+    compileSdk 33
 
     defaultConfig {
         applicationId "com.sec.check"
         minSdk 21
-        targetSdk 34
+        targetSdk 33
         versionCode 1
         versionName "1.0"
     }

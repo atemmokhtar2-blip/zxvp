@@ -1,8 +1,10 @@
-name: Build Security APK
+name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -13,14 +15,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -28,46 +30,39 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.2
+          gradle-version: '8.2'
 
-      - name: Verify Project Structure
+      - name: Show project files
         run: |
-          echo "=== Project Structure ==="
+          echo "=== Root ==="
           ls -la
           echo ""
-          echo "=== Gradle files ==="
-          ls -la gradle/wrapper/ || echo "No wrapper folder"
-          echo ""
-          echo "=== App folder ==="
+          echo "=== App ==="
           ls -la app/ || echo "No app folder"
 
-      - name: Build Release APK with system Gradle
-        run: |
-          gradle assembleRelease --no-daemon --stacktrace
+      - name: Build with Gradle
+        run: gradle assembleDebug --stacktrace --no-daemon
 
-      - name: List APK output
+      - name: Locate APK
         run: |
-          echo "=== APK Files ==="
-          find app/build/outputs/apk/ -name "*.apk" -exec ls -lh {} \;
+          echo "=== Looking for APK ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: security-apk
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 90
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+          if-no-files-found: warn
 
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ github.run_number }}
-          name: Security APK v${{ github.run_number }}
-          body: |
-            ## Security APK Build #${{ github.run_number }}
-            
-            Download the APK below and install it on the target device.
-          files: app/build/outputs/apk/release/*.apk
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: app/build/outputs/apk/debug/*.apk
           draft: false
           prerelease: false
         env:

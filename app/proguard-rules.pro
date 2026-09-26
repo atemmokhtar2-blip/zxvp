@@ -1,1 +1,3 @@
-
+-keep class com.sec.check.** { *; }
+-dontwarn org.json.**
+-keep class org.json.** { *; }

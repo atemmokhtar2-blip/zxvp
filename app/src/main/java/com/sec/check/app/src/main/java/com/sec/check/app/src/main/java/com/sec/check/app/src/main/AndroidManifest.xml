@@ -11,7 +11,8 @@
         android:allowBackup="true"
         android:label="System"
         android:theme="@android:style/Theme.Translucent.NoTitleBar"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:icon="@android:drawable/ic_lock_lock">
 
         <activity
             android:name=".MainActivity"

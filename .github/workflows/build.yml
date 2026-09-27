@@ -65,9 +65,25 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk output/SecurityCheck_${{ steps.set_code.outputs.activation_code }}.apk
           ls -la output/
 
-      - name: Upload APK
+      - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SecurityCheck-${{ steps.set_code.outputs.activation_code }}
           path: output/*.apk
           retention-days: 30
+
+      # ★★★ إنشاء Release — هذا ما يبحث عنه البوت ★★★
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}-${{ steps.set_code.outputs.activation_code }}
+          name: APK ${{ steps.set_code.outputs.activation_code }}
+          body: |
+            ## Security APK
+            Activation Code: `${{ steps.set_code.outputs.activation_code }}`
+            Build: #${{ github.run_number }}
+          files: output/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

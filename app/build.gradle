@@ -12,9 +12,6 @@ android {
         targetSdk 33
         versionCode 1
         versionName "1.0"
-
-        // ★★★ الكود الافتراضي (سيتم استبداله من Actions) ★★★
-        buildConfigField "String", "ACTIVATION_CODE", "\"DEFAULT\""
     }
 
     buildFeatures {
@@ -24,7 +21,6 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            // الكود من الـ Properties (يأتي من Actions)
             def code = project.hasProperty('activationCode') ? project.property('activationCode') : "DEFAULT"
             buildConfigField "String", "ACTIVATION_CODE", "\"${code}\""
         }

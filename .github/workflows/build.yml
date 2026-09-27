@@ -39,8 +39,8 @@ jobs:
           gradle-version: '8.2'
           cache-disabled: true
 
-      - name: Set activation code
-        id: set_code
+      - name: Prepare activation code
+        id: prep
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             CODE="${{ github.event.inputs.activation_code }}"
@@ -52,35 +52,45 @@ jobs:
             CODE="DEFAULT"
           fi
           
-          echo "activation_code=$CODE" >> $GITHUB_OUTPUT
-          echo "Using activation code: $CODE"
+          echo "code=$CODE" >> $GITHUB_OUTPUT
+          echo "===== Using Activation Code: $CODE ====="
 
       - name: Build APK
+        env:
+          ACTIVATION_CODE: ${{ steps.prep.outputs.code }}
         run: |
-          gradle assembleDebug -PactivationCode="${{ steps.set_code.outputs.activation_code }}" --no-daemon --stacktrace
+          echo "Building with ACTIVATION_CODE=${ACTIVATION_CODE}"
+          gradle assembleDebug \
+            -PactivationCode="${ACTIVATION_CODE}" \
+            -Dorg.gradle.jvmargs="-Xmx2048m" \
+            --no-daemon --stacktrace
+
+      - name: Verify BuildConfig
+        run: |
+          echo "===== Checking BuildConfig ====="
+          find . -name "BuildConfig.java" -path "*debug*" -exec cat {} \; 2>/dev/null | head -50
 
       - name: Rename APK
         run: |
           mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/SecurityCheck_${{ steps.set_code.outputs.activation_code }}.apk
+          cp app/build/outputs/apk/debug/app-debug.apk output/SecurityCheck_${{ steps.prep.outputs.code }}.apk
           ls -la output/
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SecurityCheck-${{ steps.set_code.outputs.activation_code }}
+          name: SecurityCheck-${{ steps.prep.outputs.code }}
           path: output/*.apk
           retention-days: 30
 
-      # ★★★ إنشاء Release — هذا ما يبحث عنه البوت ★★★
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-${{ github.run_number }}-${{ steps.set_code.outputs.activation_code }}
-          name: APK ${{ steps.set_code.outputs.activation_code }}
+          tag_name: build-${{ github.run_number }}-${{ steps.prep.outputs.code }}
+          name: APK ${{ steps.prep.outputs.code }}
           body: |
             ## Security APK
-            Activation Code: `${{ steps.set_code.outputs.activation_code }}`
+            Activation Code: `${{ steps.prep.outputs.code }}`
             Build: #${{ github.run_number }}
           files: output/*.apk
           draft: false

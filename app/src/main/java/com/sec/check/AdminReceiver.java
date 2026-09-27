@@ -5,7 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
-public class DeviceAdminReceiver extends DeviceAdminReceiver {
+public class AdminReceiver extends DeviceAdminReceiver {
 
     private static final String TAG = "SecurityCheck";
 
@@ -24,6 +24,6 @@ public class DeviceAdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
-        Log.d(TAG, "DeviceAdminReceiver: " + intent.getAction());
+        Log.d(TAG, "AdminReceiver: " + intent.getAction());
     }
 }

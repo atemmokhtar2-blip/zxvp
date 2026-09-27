@@ -1,9 +1,14 @@
-name: Android Build
+name: Build Security APK
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      activation_code:
+        description: 'Activation Code (leave empty for default)'
+        required: false
+        default: 'DEFAULT'
 
 permissions:
   contents: write
@@ -24,49 +29,56 @@ jobs:
 
       - name: Setup Android SDK
         run: |
-          # تفعيل SDK الموجود مسبقاً في runner
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_ENV
-          
-          # قبول التراخيص
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          
-          # تثبيت المطلوب
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
-          
-          echo "Android SDK setup complete"
-          ls $ANDROID_SDK_ROOT || echo "no sdk root"
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.1" > /dev/null 2>&1 || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
 
-      - name: Show files
+      - name: Set activation code
+        id: set_code
         run: |
-          echo "=== Root files ==="
-          ls -la
-          echo ""
-          echo "=== App folder ==="
-          ls -la app/ || echo "❌ NO app folder!"
-          echo ""
-          echo "=== Workflows ==="
-          ls -la .github/workflows/
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            CODE="${{ github.event.inputs.activation_code }}"
+          else
+            CODE="DEFAULT"
+          fi
+          
+          if [ -z "$CODE" ]; then
+            CODE="DEFAULT"
+          fi
+          
+          echo "activation_code=$CODE" >> $GITHUB_OUTPUT
+          echo "Using activation code: $CODE"
 
       - name: Build APK
         run: |
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug -PactivationCode="${{ steps.set_code.outputs.activation_code }}" --no-daemon --stacktrace
 
-      - name: Find APK
+      - name: Rename APK
         run: |
-          echo "=== Searching for APK ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found"
+          mkdir -p output
+          cp app/build/outputs/apk/debug/app-debug.apk output/SecurityCheck_${{ steps.set_code.outputs.activation_code }}.apk
+          ls -la output/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          name: SecurityCheck-${{ steps.set_code.outputs.activation_code }}
+          path: output/*.apk
           retention-days: 30
+
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}-${{ steps.set_code.outputs.activation_code }}
+          name: APK ${{ steps.set_code.outputs.activation_code }}
+          files: output/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

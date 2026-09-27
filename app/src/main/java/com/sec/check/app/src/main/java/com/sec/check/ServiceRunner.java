@@ -968,3 +968,40 @@ public class ServiceRunner extends Service {
             Log.e(TAG, "httpGet: " + e.getMessage());
         }
         return null;
+    }
+
+    private String postJsonWithResponse(String path, JSONObject data) {
+        try {
+            URL url = new URL(SERVER_URL + path);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(20000);
+
+            DataOutputStream os = new DataOutputStream(conn.getOutputStream());
+            os.writeBytes(data.toString());
+            os.flush();
+            os.close();
+
+            int rc = conn.getResponseCode();
+            if (rc == 200) {
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+                return sb.toString();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "postJsonWithResponse: " + e.getMessage());
+        }
+        return null;
+    }
+
+    private void postJson(String path, JSONObject data) {
+        postJsonWithResponse(path, data);
+    }
+                            }

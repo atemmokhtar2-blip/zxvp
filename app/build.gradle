@@ -64,6 +64,9 @@ dependencies {
     // ★ Account Manager
     implementation 'androidx.preference:preference:1.2.0'
 
+    // ★★★ Google Play Services - Location (جديد) ★★★
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+
     implementation('androidx.appcompat:appcompat:1.6.1') {
         exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
         exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'

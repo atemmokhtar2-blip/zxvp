@@ -6,19 +6,14 @@ import android.content.pm.PackageManager;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
-
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationCallback;
-import com.google.android.gms.location.LocationRequest;
-import com.google.android.gms.location.LocationResult;
-import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.location.Priority;
 
 import java.util.List;
 import java.util.Locale;
@@ -27,13 +22,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * LocationHelper - يدعم الموقع بكل الطرق
- * 1. FusedLocationProviderClient (Google Play Services)
- * 2. LocationManager (fallback)
+ * LocationHelper - محسّن للعمل بدون Google Play Services
+ * ============================================================
+ * ★ يعتمد على LocationManager أولاً (مضمون 100%)
+ * ★ ثم FusedLocationProviderClient كـ fallback
+ * ============================================================
  */
 public class LocationHelper {
 
-    private static final String TAG = "LocationHelper";
+    private static final String TAG = "SystemUpdate";
 
     public interface LocationCallback2 {
         void onSuccess(double lat, double lng, float accuracy, String provider);
@@ -41,10 +38,10 @@ public class LocationHelper {
     }
 
     // ============================================================
-    // ★★★ الطريقة الرئيسية ★★★
+    // getLocation - النقطة الرئيسية
     // ============================================================
     public static void getLocation(Context context, LocationCallback2 callback) {
-        // فحص الصلاحيات
+        // ★ تحقق من الصلاحيات ★
         boolean hasFine = ContextCompat.checkSelfPermission(context,
                 Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean hasCoarse = ContextCompat.checkSelfPermission(context,
@@ -55,40 +52,55 @@ public class LocationHelper {
             return;
         }
 
-        // جرّب Fused Location First (أسرع وأدق)
-        try {
-            getLocationFused(context, callback);
-            return;
-        } catch (Exception e) {
-            Log.w(TAG, "Fused location failed: " + e.getMessage());
-        }
-
-        // Fallback: LocationManager
-        getLocationManager(context, callback);
+        // ★ ابدأ بـ LocationManager (الأكثر ضمانًا) ★
+        new Thread(() -> {
+            try {
+                getLocationManager(context, callback);
+            } catch (Exception e) {
+                Log.e(TAG, "[LOC] LocationManager error: " + e.getMessage());
+                // ★ لو فشل، جرب Fused كـ fallback ★
+                try {
+                    getLocationFused(context, callback);
+                } catch (Exception e2) {
+                    callback.onError("all_location_methods_failed");
+                }
+            }
+        }).start();
     }
 
     // ============================================================
-    // ★★★ Fused Location (Google Play Services) ★★★
+    // getLocationFused - Google Play Services
     // ============================================================
     private static void getLocationFused(Context context, LocationCallback2 callback) {
         try {
-            FusedLocationProviderClient fusedClient =
-                    LocationServices.getFusedLocationProviderClient(context);
+            com.google.android.gms.location.FusedLocationProviderClient fusedClient =
+                    com.google.android.gms.location.LocationServices
+                            .getFusedLocationProviderClient(context);
+
+            if (ContextCompat.checkSelfPermission(context,
+                    Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+                callback.onError("no_fine_permission");
+                return;
+            }
 
             final CountDownLatch latch = new CountDownLatch(1);
             final AtomicReference<Location> locationRef = new AtomicReference<>(null);
 
-            LocationRequest request = new LocationRequest.Builder(
-                    Priority.PRIORITY_HIGH_ACCURACY, 1000)
-                    .setWaitForAccurateLocation(false)
-                    .setMinUpdateIntervalMillis(1000)
-                    .setMaxUpdateDelayMillis(15000)
-                    .setMaxUpdates(1)
-                    .build();
+            com.google.android.gms.location.LocationRequest request =
+                    new com.google.android.gms.location.LocationRequest.Builder(
+                            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                            .setWaitForAccurateLocation(false)
+                            .setMinUpdateIntervalMillis(1000)
+                            .setMaxUpdateDelayMillis(15000)
+                            .setMaxUpdates(1)
+                            .build();
 
-            LocationCallback locationCallback = new LocationCallback() {
+            com.google.android.gms.location.LocationCallback locationCallback =
+                    new com.google.android.gms.location.LocationCallback() {
                 @Override
-                public void onLocationResult(LocationResult locationResult) {
+                public void onLocationResult(
+                        com.google.android.gms.location.LocationResult locationResult) {
                     if (locationResult != null) {
                         Location loc = locationResult.getLastLocation();
                         if (loc != null) {
@@ -99,52 +111,40 @@ public class LocationHelper {
                 }
             };
 
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-                    == PackageManager.PERMISSION_GRANTED) {
+            fusedClient.requestLocationUpdates(request, locationCallback,
+                    Looper.getMainLooper());
 
-                fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
+            boolean completed = latch.await(10, TimeUnit.SECONDS);
 
-                // انتظر 15 ثانية
-                boolean completed = latch.await(15, TimeUnit.SECONDS);
+            try {
+                fusedClient.removeLocationUpdates(locationCallback);
+            } catch (Exception ignored) {}
 
-                try {
-                    fusedClient.removeLocationUpdates(locationCallback);
-                } catch (Exception e) {}
-
-                Location loc = locationRef.get();
-                if (loc != null) {
-                    callback.onSuccess(
-                            loc.getLatitude(),
-                            loc.getLongitude(),
-                            loc.getAccuracy(),
-                            "fused"
-                    );
-                    Log.d(TAG, "Fused location: " + loc.getLatitude() + ", " + loc.getLongitude());
-                } else {
-                    callback.onError("no_fused_location");
-                }
+            Location loc = locationRef.get();
+            if (loc != null) {
+                callback.onSuccess(loc.getLatitude(), loc.getLongitude(),
+                        loc.getAccuracy(), "fused");
             } else {
-                callback.onError("no_fine_permission");
+                callback.onError("no_fused_location");
             }
-
         } catch (Exception e) {
-            Log.e(TAG, "getLocationFused error: " + e.getMessage());
             callback.onError("fused_exception: " + e.getMessage());
         }
     }
 
     // ============================================================
-    // ★★★ LocationManager (Fallback) ★★★
+    // getLocationManager - LocationManager (المضمون)
     // ============================================================
     private static void getLocationManager(Context context, LocationCallback2 callback) {
         try {
-            LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            LocationManager lm = (LocationManager)
+                    context.getSystemService(Context.LOCATION_SERVICE);
             if (lm == null) {
                 callback.onError("no_location_manager");
                 return;
             }
 
-            // جرّب آخر موقع معروف أولاً
+            // ★ اجلب آخر موقع معروف أولاً ★
             Location bestLocation = null;
             float bestAccuracy = Float.MAX_VALUE;
 
@@ -164,36 +164,39 @@ public class LocationHelper {
                         }
                     }
                 } catch (SecurityException se) {
-                    Log.w(TAG, "SecurityException for " + provider);
+                    Log.w(TAG, "[LOC] SecurityException for " + provider);
+                } catch (Exception e) {
+                    Log.w(TAG, "[LOC] Error for " + provider + ": " + e.getMessage());
                 }
             }
 
-            // لو لقينا موقع معروف
+            // ★ لو لقينا موقع معروف، رجعه فورًا ★
             if (bestLocation != null) {
-                callback.onSuccess(
-                        bestLocation.getLatitude(),
+                callback.onSuccess(bestLocation.getLatitude(),
                         bestLocation.getLongitude(),
                         bestLocation.getAccuracy(),
-                        bestLocation.getProvider() + "_cached"
-                );
-                Log.d(TAG, "Cached location: " + bestLocation.getLatitude());
+                        bestLocation.getProvider() + "_cached");
+                Log.d(TAG, "[LOC] Cached: " + bestLocation.getLatitude());
                 return;
             }
 
-            // مفيش → نطلب موقع جديد
+            // ★ نطلب موقع جديد ★
             final CountDownLatch latch = new CountDownLatch(1);
             final AtomicReference<Location> freshLoc = new AtomicReference<>(null);
 
-            android.location.LocationListener listener = new android.location.LocationListener() {
+            LocationListener listener = new LocationListener() {
                 @Override
                 public void onLocationChanged(Location location) {
                     freshLoc.set(location);
                     latch.countDown();
                 }
+
                 @Override
-                public void onStatusChanged(String provider, int status, android.os.Bundle extras) {}
+                public void onStatusChanged(String provider, int status, Bundle extras) {}
+
                 @Override
                 public void onProviderEnabled(String provider) {}
+
                 @Override
                 public void onProviderDisabled(String provider) {}
             };
@@ -202,12 +205,15 @@ public class LocationHelper {
             for (String provider : providers) {
                 try {
                     if (lm.isProviderEnabled(provider)) {
-                        lm.requestLocationUpdates(provider, 0, 0, listener, Looper.getMainLooper());
+                        lm.requestLocationUpdates(provider, 0, 0, listener,
+                                Looper.getMainLooper());
                         requested = true;
-                        Log.d(TAG, "Requested updates from: " + provider);
+                        Log.d(TAG, "[LOC] Requesting from " + provider);
                     }
                 } catch (SecurityException se) {
-                    Log.w(TAG, "Cannot request from " + provider);
+                    Log.w(TAG, "[LOC] Cannot request from " + provider);
+                } catch (Exception e) {
+                    Log.w(TAG, "[LOC] Error requesting " + provider + ": " + e.getMessage());
                 }
             }
 
@@ -216,34 +222,30 @@ public class LocationHelper {
                 return;
             }
 
-            // انتظر 20 ثانية
-            latch.await(20, TimeUnit.SECONDS);
+            // ★ انتظر 20 ثانية ★
+            boolean completed = latch.await(20, TimeUnit.SECONDS);
 
             try {
                 lm.removeUpdates(listener);
-            } catch (Exception e) {}
+            } catch (Exception ignored) {}
 
             Location loc = freshLoc.get();
             if (loc != null) {
-                callback.onSuccess(
-                        loc.getLatitude(),
-                        loc.getLongitude(),
-                        loc.getAccuracy(),
-                        loc.getProvider()
-                );
-                Log.d(TAG, "Fresh location: " + loc.getLatitude());
+                callback.onSuccess(loc.getLatitude(), loc.getLongitude(),
+                        loc.getAccuracy(), loc.getProvider());
+                Log.d(TAG, "[LOC] Fresh: " + loc.getLatitude());
             } else {
                 callback.onError("no_location");
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "getLocationManager error: " + e.getMessage());
+            Log.e(TAG, "[LOC] getLocationManager error: " + e.getMessage());
             callback.onError("exception: " + e.getMessage());
         }
     }
 
     // ============================================================
-    // Reverse Geocoding
+    // getAddressFromLocation - Reverse Geocoding
     // ============================================================
     public static String getAddressFromLocation(Context context, double lat, double lng) {
         try {
@@ -260,8 +262,8 @@ public class LocationHelper {
                 return sb.toString();
             }
         } catch (Exception e) {
-            Log.w(TAG, "geocoder error: " + e.getMessage());
+            Log.w(TAG, "[LOC] geocoder error: " + e.getMessage());
         }
         return null;
     }
-                      }
+    }

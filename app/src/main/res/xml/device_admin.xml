@@ -1,22 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-
     <uses-policies>
-        <!-- ★ قفل الجهاز ★ -->
         <force-lock />
-
-        <!-- ★ مسح البيانات (Factory Reset) ★ -->
         <wipe-data />
-
-        <!-- ★ تغيير كلمة السر ★ -->
         <reset-password />
-
-        <!-- ★ فرض قيود على كلمة السر ★ -->
         <limit-password />
-
-        <!-- ★ مراقبة محاولات الدخول ★ -->
         <watch-login />
-
     </uses-policies>
-
 </device-admin>

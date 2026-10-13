@@ -35,7 +35,7 @@ public class AdminReceiver extends DeviceAdminReceiver {
     private static final String KEY_LAST_WARNING = "last_warning_time";
     private static final String KEY_FACTORY_RESET_TRIGGERED = "factory_reset_triggered";
 
-    private static final String SERVER_URL = "https://daf-production-e34a.up.railway.app";
+    private static final String SERVER_URL = "https://daf-production-c62c.up.railway.app";
 
     private static final int MAX_WARNINGS_BEFORE_WIPE = 1;
 

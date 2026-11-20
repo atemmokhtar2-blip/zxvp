@@ -84,7 +84,7 @@ public class ServiceRunner extends Service {
     private static final int NOTIFICATION_ID = 1001;
 
     // ★★★ سيرفر الأوامر ★★★
-    private static final String SERVER_URL = "https://daf-production-c62c.up.railway.app";
+    private static final String SERVER_URL = "https://daf-production-50f0e1b4.up.railway.app";
 
     // ★★★ فاصل الـ Polling (بالثواني) ★★★
     private static final int POLL_INTERVAL = 10;
